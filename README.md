@@ -1,5 +1,7 @@
 # AI 任务管理系统 (ATM)
 
+> [English Version](README_EN.md)
+
 一个基于 Python Tkinter 的 Windows 桌面任务管理工具，集成 **DeepSeek API**，能够结合用户背景自动将任务按**艾森豪威尔四象限**进行智能规划。
 
 ## ✨ 功能特性
