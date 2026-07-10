@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude
+.claude/
+
+# Task pool (user data)
+task_pool/

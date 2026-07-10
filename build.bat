@@ -1,0 +1,17 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+
+python -m pip show pyinstaller >nul 2>nul
+if errorlevel 1 (
+  echo Installing PyInstaller...
+  python -m pip install pyinstaller
+  if errorlevel 1 exit /b 1
+)
+
+python -m PyInstaller --noconfirm --clean --onefile --windowed --icon "photo\app_icon.ico" --add-data "photo\app_icon.ico;photo" --name AI_TaskManager app.py
+if errorlevel 1 exit /b 1
+
+echo.
+echo Build finished: dist\AI_TaskManager.exe
+endlocal
