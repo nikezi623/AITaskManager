@@ -116,6 +116,11 @@ TS = {
         "bot_periodic_reminders": "周期任务提醒",
         "bot_no_tasks": "暂无待办任务",
         "bot_due": "截止",
+        "bot_test_send": "测试发送",
+        "bot_register_task": "注册 Windows 计划任务",
+        "bot_test_sent": "测试消息已发送！请检查企业微信。",
+        "bot_task_registered": "Windows 计划任务已注册（每天 06:05 运行），无需软件常驻。",
+        "bot_task_register_error": "计划任务注册失败，请以管理员身份运行本程序。",
         "bot_sending": "正在发送企业微信消息…",
         "status_bot_sent": "企业微信消息已发送",
         "status_bot_error": "企业微信消息发送失败：{error}",
@@ -247,6 +252,11 @@ TS = {
         "bot_periodic_reminders": "Recurring Reminders",
         "bot_no_tasks": "No pending tasks",
         "bot_due": "Due",
+        "bot_test_send": "Test Send",
+        "bot_register_task": "Register Windows Task",
+        "bot_test_sent": "Test message sent! Check WeChat Work.",
+        "bot_task_registered": "Windows scheduled task registered (daily 06:05). No need to keep app running.",
+        "bot_task_register_error": "Failed to register task. Please run as Administrator.",
         "bot_sending": "Sending WeChat Work message…",
         "status_bot_sent": "WeChat message sent",
         "status_bot_error": "WeChat message failed: {error}",
@@ -818,6 +828,18 @@ class TaskManagerApp(tk.Tk):
         ttk.Label(self._bot_frame_lf, text=self.t("bot_webhook_label"), style="Card.TLabel").pack(anchor=tk.W, pady=(6, 2))
         ttk.Entry(self._bot_frame_lf, textvariable=self.webhook_url_var).pack(fill=tk.X)
 
+        # 按钮行：测试发送 + 注册计划任务
+        btn_row = ttk.Frame(self._bot_frame_lf, style="Card.TFrame")
+        btn_row.pack(fill=tk.X, pady=(8, 0))
+        self._reg(
+            ttk.Button(btn_row, text=self.t("bot_test_send"), command=self._test_bot_send),
+            "text", "bot_test_send",
+        ).pack(side=tk.LEFT)
+        self._reg(
+            ttk.Button(btn_row, text=self.t("bot_register_task"), command=self._register_scheduled_task),
+            "text", "bot_register_task",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
         self._bot_status_label = ttk.Label(
             self._bot_frame_lf,
             text=self.t("bot_status_disabled") if not self.bot_enabled.get() else self.t("bot_status_enabled"),
@@ -832,7 +854,15 @@ class TaskManagerApp(tk.Tk):
         self._reg(
             ttk.Label(parent, text=self.t("category_plan_hint"), style="Card.TLabel"),
             "text", "category_plan_hint",
-        ).pack(anchor=tk.W, pady=(4, 10))
+        ).pack(anchor=tk.W, pady=(4, 4))
+
+        # 日期时间显示
+        self._datetime_label = tk.Label(
+            parent, text="", bg=FLUENT_CARD_BG, fg=FLUENT_TEXT_SECONDARY,
+            font=("Segoe UI", self.font_size.get()),
+        )
+        self._datetime_label.pack(anchor=tk.E, pady=(0, 6))
+        self._update_datetime()
 
         self._cat_canvas = tk.Canvas(parent, bg=FLUENT_CARD_BG, highlightthickness=0)
         self._cat_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self._cat_canvas.yview)
@@ -948,6 +978,17 @@ class TaskManagerApp(tk.Tk):
     # ══════════════════════════════════════════════════════════════
     #  字体缩放
     # ══════════════════════════════════════════════════════════════
+    def _update_datetime(self):
+        now = datetime.now()
+        weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        wd = weekdays[now.weekday()]
+        text = now.strftime(f"%Y-%m-%d {wd}  %H:%M:%S")
+        try:
+            self._datetime_label.configure(text=text)
+        except (tk.TclError, AttributeError):
+            return
+        self.after(1000, self._update_datetime)
+
     def change_font_size(self, delta):
         next_size = max(10, min(22, self.font_size.get() + delta))
         self.font_size.set(next_size)
@@ -1428,7 +1469,7 @@ class TaskManagerApp(tk.Tk):
         # 动态构建分类列表和输出格式
         cat_names = self.get_category_names()
         category_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(cat_names))
-        category_format = "\n\n".join(f"## {name}\n- 任务：简短原因" for name in cat_names)
+        category_format = "\n\n".join(f"## {name}\n- 任务" for name in cat_names)
 
         system_prompt = self.t("api_system_prompt")
         user_prompt = self._fmt("api_user_prompt", background=background, tasks_md=tasks_md,
@@ -1493,6 +1534,47 @@ class TaskManagerApp(tk.Tk):
             self._bot_status_label.configure(text=self.t("bot_status_enabled"))
         else:
             self._bot_status_label.configure(text=self.t("bot_status_disabled"))
+
+    def _test_bot_send(self):
+        """手动触发一次测试发送"""
+        self.status_var.set(self.t("bot_sending"))
+        threading.Thread(target=self._send_bot_message, daemon=True).start()
+        # 延迟检查结果
+        self.after(3000, lambda: self.status_var.set(
+            self.t("bot_test_sent") if self._last_bot_date else self.t("status_bot_error", error="")
+        ))
+        self.after(3000, lambda: messagebox.showinfo(self.t("notify_title"), self.t("bot_test_sent")))
+
+    def _register_scheduled_task(self):
+        """注册 Windows 计划任务，每天 06:05 执行"""
+        import subprocess
+        exe_path = sys.executable if not getattr(sys, "frozen", False) else sys.executable
+        if getattr(sys, "frozen", False):
+            program = f'"{sys.executable}" --send-report'
+        else:
+            pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            script = Path(__file__).resolve()
+            program = f'"{pythonw}" "{script}" --send-report'
+
+        task_name = "ATM_DailyReport"
+        # 先删除已有同名任务
+        subprocess.run(
+            f'schtasks /delete /tn "{task_name}" /f',
+            shell=True, capture_output=True,
+        )
+        # 创建新任务
+        result = subprocess.run(
+            f'schtasks /create /tn "{task_name}" /tr {program} '
+            f'/sc daily /st 06:05 /f',
+            shell=True, capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            self.status_var.set(self.t("bot_task_registered"))
+            messagebox.showinfo(self.t("notify_title"), self.t("bot_task_registered"))
+        else:
+            self.status_var.set(self.t("bot_task_register_error"))
+            messagebox.showwarning(self.t("notify_title"),
+                                   f"{self.t('bot_task_register_error')}\n\n{result.stderr}")
 
     def _schedule_bot_check(self):
         if self._bot_after_id:
@@ -1594,6 +1676,97 @@ class TaskManagerApp(tk.Tk):
         os.startfile(str(POOL_DIR))
 
 
+def _send_report_and_exit():
+    """CLI 模式：加载任务 → 发送企业微信消息 → 退出（供 Windows 计划任务调用）"""
+    import json as _json
+    pool = BASE_DIR / TASK_POOL_DIR
+    tasks_path = pool / TASKS_JSON
+    periodic_path = pool / PERIODIC_JSON
+    settings_path = pool / SETTINGS_JSON
+
+    # 加载设置
+    webhook_url = DEFAULT_WEBHOOK_URL
+    lang = "zh"
+    try:
+        if settings_path.exists():
+            s = _json.loads(settings_path.read_text(encoding="utf-8"))
+            if s.get("webhook_url"):
+                webhook_url = s["webhook_url"]
+            if not s.get("bot_enabled", False):
+                print("Bot not enabled, skip.")
+                return
+    except Exception:
+        pass
+
+    # 加载任务
+    regular_tasks = []
+    periodic_tasks = []
+    try:
+        if tasks_path.exists():
+            data = _json.loads(tasks_path.read_text(encoding="utf-8"))
+            for item in data:
+                if isinstance(item, dict) and item.get("text"):
+                    if not item.get("completed"):
+                        regular_tasks.append(item["text"].strip())
+                elif isinstance(item, str):
+                    regular_tasks.append(item.strip())
+    except Exception:
+        pass
+    try:
+        if periodic_path.exists():
+            data = _json.loads(periodic_path.read_text(encoding="utf-8"))
+            for item in data:
+                if isinstance(item, dict) and item.get("text"):
+                    if not item.get("completed"):
+                        cycle = item.get("cycle", "daily")
+                        cl = {"daily": "每天", "weekly": "每周", "monthly": "每月"}.get(cycle, cycle)
+                        periodic_tasks.append((item["text"].strip(), cl, ""))
+    except Exception:
+        pass
+
+    # 构建消息
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d %A")
+    lines = [
+        "## 🤖 AI Task Manager - 每日任务提醒",
+        "",
+        f"**日期**: {date_str}",
+        f"共 **{len(regular_tasks)}** 个普通任务，**{len(periodic_tasks)}** 个周期任务",
+        "",
+        f"### 待完成任务（{len(regular_tasks)}）",
+    ]
+    for t in regular_tasks:
+        lines.append(f"- {t}")
+    if not regular_tasks:
+        lines.append("- 暂无待办任务")
+
+    if periodic_tasks:
+        lines.extend(["", f"### 周期任务提醒（{len(periodic_tasks)}）"])
+        for text, cl, dl in periodic_tasks:
+            lines.append(f"- [{cl}] {text}")
+
+    message = "\n".join(lines)
+    payload = _json.dumps({"msgtype": "markdown", "markdown": {"content": message}}).encode("utf-8")
+
+    # 发送
+    try:
+        req = urllib.request.Request(
+            webhook_url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = _json.loads(resp.read().decode("utf-8"))
+            if result.get("errcode") == 0:
+                print(f"[{datetime.now()}] Report sent successfully.")
+            else:
+                print(f"[{datetime.now()}] Failed: {result.get('errmsg')}")
+    except Exception as exc:
+        print(f"[{datetime.now()}] Error: {exc}")
+
+
 if __name__ == "__main__":
+    if "--send-report" in sys.argv:
+        _send_report_and_exit()
+        sys.exit(0)
     app = TaskManagerApp()
     app.mainloop()
