@@ -1545,24 +1545,46 @@ class TaskManagerApp(tk.Tk):
         date_str = now.strftime("%Y-%m-%d %A")
         pending_regular = [t for t in self.tasks if not t.get("completed")]
         pending_periodic = [t for t in self.periodic_tasks if not t.get("completed")]
+        total_regular = len(pending_regular)
+        total_periodic = len(pending_periodic)
+
         lines = [
             f"## {self.t('bot_sent_title')}",
             "",
             f"**{self.t('bot_date_label')}**: {date_str}",
+            f"共 **{total_regular}** 个普通任务，**{total_periodic}** 个周期任务",
             "",
         ]
-        lines.append(f"### {self.t('bot_pending_tasks')}")
+
+        # 待完成任务
+        lines.append(f"### {self.t('bot_pending_tasks')}（{total_regular}）")
         if pending_regular:
+            shown = 0
             for t in pending_regular:
-                lines.append(f"- {t['text']}")
+                task_line = f"- {t['text']}"
+                # 企业微信 markdown 消息上限约 4096 字符，留 200 余量
+                if len("\n".join(lines)) + len(task_line) > 3800:
+                    lines.append(f"- ... 还有 {total_regular - shown} 个任务未显示")
+                    break
+                lines.append(task_line)
+                shown += 1
         else:
             lines.append(f"- {self.t('bot_no_tasks')}")
+
+        # 周期任务提醒
         if pending_periodic:
-            lines.extend(["", f"### {self.t('bot_periodic_reminders')}"])
+            lines.extend(["", f"### {self.t('bot_periodic_reminders')}（{total_periodic}）"])
+            shown = 0
             for t in pending_periodic:
                 dl = self.deadline_label(t["cycle"])
                 cl = self._cycle_label(t["cycle"])
-                lines.append(f"- [{cl}, {self.t('bot_due')} {dl}] {t['text']}")
+                task_line = f"- [{cl}, {self.t('bot_due')} {dl}] {t['text']}"
+                if len("\n".join(lines)) + len(task_line) > 3800:
+                    lines.append(f"- ... 还有 {total_periodic - shown} 个任务未显示")
+                    break
+                lines.append(task_line)
+                shown += 1
+
         return "\n".join(lines)
 
     # ══════════════════════════════════════════════════════════════
