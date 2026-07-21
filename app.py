@@ -1320,11 +1320,43 @@ class HabitApp(QMainWindow):
 # ══════════════════════════════════════════════════════════════════
 #  CLI --send-report
 # ══════════════════════════════════════════════════════════════════
+def _find_task_pool(base_dir: Path) -> Path:
+    """Search for the actual task_pool with habit data."""
+    local = base_dir / "task_pool"
+    if (local / "habits.json").exists():
+        return local
+    parent = base_dir.parent / "task_pool"
+    if (parent / "habits.json").exists():
+        return parent
+    grandparent = base_dir.parent.parent / "task_pool"
+    if (grandparent / "habits.json").exists():
+        return grandparent
+    return local
+
+
 def _send_report_and_exit():
-    ds = DataStore()
-    if not ds.settings.get("bot_enabled", False):
+    tp = _find_task_pool(BASE_DIR)
+
+    # Read habits directly from the found task_pool
+    try:
+        habits = json.loads((tp / "habits.json").read_text(encoding="utf-8"))
+    except Exception:
+        habits = []
+    try:
+        groups = json.loads((tp / "groups.json").read_text(encoding="utf-8"))
+    except Exception:
+        groups = []
+    try:
+        settings = json.loads((tp / "settings.json").read_text(encoding="utf-8"))
+    except Exception:
+        settings = {}
+
+    if not settings.get("bot_enabled", False):
         print("Bot not enabled.")
         return
+
+    lang = settings.get("lang", "zh")
+    t = lambda key: TS.get(lang, TS["zh"]).get(key, TS["zh"].get(key, key))
 
     today_str = date.today().strftime("%Y-%m-%d")
     today_weekday = date.today().strftime("%A")
@@ -1332,13 +1364,13 @@ def _send_report_and_exit():
 
     done_today = []
     pending_today = []
-    for h in ds.habits:
+    for h in habits:
         if today_str in h.get("checkins", []):
             done_today.append(h["name"])
         else:
             pending_today.append(h["name"])
 
-    total = len(ds.habits)
+    total = len(habits)
     done_count = len(done_today)
     rate = round(done_count / total * 100) if total > 0 else 0
 
@@ -1360,10 +1392,10 @@ def _send_report_and_exit():
             lines.append(f"- ✓ {name}")
 
     if total == 0:
-        lines.append(f"- {ds.t('bot_no_habits')}")
+        lines.append(f"- {t('bot_no_habits')}")
 
     message = "\n".join(lines)
-    webhook = ds.settings.get("webhook_url", DEFAULT_WEBHOOK)
+    webhook = settings.get("webhook_url", DEFAULT_WEBHOOK)
     payload = json.dumps({"msgtype": "markdown", "markdown": {"content": message}}).encode("utf-8")
 
     try:
