@@ -292,7 +292,8 @@ class CheckInButton(QPushButton):
 
 class HabitRow(QFrame):
     checkin_toggled = Signal(str, str)
-    context_menu_requested = Signal(object, object)  # habit, QPoint
+    context_menu_requested = Signal(object, object)
+    dropped_on = Signal(str, str)  # dragged_habit_id, target_habit_id
 
     def __init__(self, data: DataStore, habit: dict, selected_date_str: str, parent=None):
         super().__init__(parent)
@@ -300,7 +301,9 @@ class HabitRow(QFrame):
         self.habit = habit
         self.date_str = selected_date_str
         self._show_streak = False
+        self._drag_start = None
         self.setFixedHeight(52)
+        self.setAcceptDrops(True)
         self.setStyleSheet(
             f"HabitRow {{ background: {CARD_BG}; border-radius: 8px; "
             f"border: 1px solid {BORDER}; margin: 2px 0; }}"
@@ -311,6 +314,54 @@ class HabitRow(QFrame):
 
     def _on_context_menu(self, pos):
         self.context_menu_requested.emit(self.habit, self.mapToGlobal(pos))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is None:
+            super().mouseMoveEvent(event)
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < 15:
+            super().mouseMoveEvent(event)
+            return
+        from PySide6.QtGui import QDrag, QPixmap
+        from PySide6.QtCore import QMimeData
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setText(self.habit["id"])
+        drag.setMimeData(mime)
+        pixmap = self.grab()
+        drag.setPixmap(pixmap.scaled(pixmap.width() // 2, pixmap.height() // 2, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        drag.setHotSpot(event.position().toPoint() / 2)
+        self._drag_start = None
+        drag.exec(Qt.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            self.setStyleSheet(
+                f"HabitRow {{ background: #e8f4fd; border-radius: 8px; "
+                f"border: 2px dashed {PRIMARY}; margin: 2px 0; }}"
+            )
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self.setStyleSheet(
+            f"HabitRow {{ background: {CARD_BG}; border-radius: 8px; "
+            f"border: 1px solid {BORDER}; margin: 2px 0; }}"
+        )
+
+    def dropEvent(self, event):
+        dragged_id = event.mimeData().text()
+        self.setStyleSheet(
+            f"HabitRow {{ background: {CARD_BG}; border-radius: 8px; "
+            f"border: 1px solid {BORDER}; margin: 2px 0; }}"
+        )
+        if dragged_id != self.habit["id"]:
+            self.dropped_on.emit(dragged_id, self.habit["id"])
+        event.acceptProposedAction()
 
     def _build(self):
         layout = QHBoxLayout(self)
@@ -450,8 +501,8 @@ class WeekNavBar(QWidget):
             wd = weekdays_en[i] if self.data.lang == "en" else weekdays_zh[i]
             dow = QLabel(wd)
             dow.setAlignment(Qt.AlignCenter)
-            dow.setFont(QFont("Segoe UI", 10))
-            dow.setStyleSheet(f"color: {TEXT_SEC}; border: none; background: transparent;")
+            dow.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            dow.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
             cell.addWidget(dow)
 
             # Date number
@@ -462,13 +513,14 @@ class WeekNavBar(QWidget):
             # Highlight selected/today
             if d == self.data.selected_date:
                 num.setStyleSheet(
-                    f"color: white; background: {PRIMARY}; border-radius: 16px; "
-                    f"min-width: 32px; min-height: 32px; padding: 4px;"
+                    "color: #ffffff; background: #0078d4; border-radius: 16px; "
+                    "min-width: 32px; min-height: 32px; padding: 4px; font-weight: bold;"
                 )
+                num.setFixedSize(32, 32)
             elif d == today:
-                num.setStyleSheet(f"color: {PRIMARY}; border: none; background: transparent;")
+                num.setStyleSheet("color: #0078d4; border: none; background: transparent; font-weight: bold;")
             else:
-                num.setStyleSheet(f"color: {TEXT}; border: none; background: transparent;")
+                num.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
             cell.addWidget(num, alignment=Qt.AlignCenter)
 
             # Dot (completion indicator)
@@ -478,11 +530,11 @@ class WeekNavBar(QWidget):
             all_done = len(all_ids) > 0 and checked == all_ids
 
             dot = QLabel()
-            dot.setFixedSize(8, 8)
+            dot.setFixedSize(12, 12)
             if all_done:
-                dot.setStyleSheet("background: #107c10; border-radius: 4px;")
+                dot.setStyleSheet("background: #107c10; border-radius: 6px;")
             else:
-                dot.setStyleSheet(f"background: {DOT_GRAY}; border-radius: 4px;")
+                dot.setStyleSheet("background: #d0d0d0; border-radius: 6px;")
             cell.addWidget(dot, alignment=Qt.AlignCenter)
 
             # Make clickable
@@ -490,7 +542,10 @@ class WeekNavBar(QWidget):
             wrapper.setFlat(True)
             wrapper.setCursor(Qt.PointingHandCursor)
             wrapper.setLayout(cell)
-            wrapper.setStyleSheet("QPushButton { border: none; background: transparent; }")
+            wrapper.setStyleSheet(
+                "QPushButton { border: none; background: transparent; padding: 4px; }"
+                "QPushButton:hover { background: #f5f5f5; border-radius: 8px; }"
+            )
             wrapper.clicked.connect(lambda checked, dd=d: self._select_date(dd))
             layout.addWidget(wrapper, 1)
             self.day_widgets.append((wrapper, d))
@@ -527,11 +582,16 @@ class StatsDialog(QDialog):
         self.habit = habit
         self.setWindowTitle(data.t("stats_title"))
         self.setMinimumSize(360, 400)
-        self.setStyleSheet(f"QDialog {{ background: {CARD_BG}; }}")
+        self.setStyleSheet(
+            "QDialog { background: #ffffff; }"
+            "QLabel { color: #1f1f1f; background: transparent; border: none; }"
+            "QFrame { background: #ffffff; }"
+        )
         self._build()
 
     def _build(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(8)
 
         title = QLabel(self.data.t("stats_title"))
         title.setFont(QFont("Segoe UI", 16, QFont.Bold))
@@ -886,6 +946,7 @@ class HabitApp(QMainWindow):
                     row = HabitRow(self.data, h, today_str)
                     row.checkin_toggled.connect(self._on_checkin_toggled)
                     row.context_menu_requested.connect(self._habit_context_menu)
+                    row.dropped_on.connect(self._on_drag_drop)
                     self._habit_layout.insertWidget(self._habit_layout.count() - 1, row)
                     self._habit_rows[h["id"]] = row
 
@@ -931,14 +992,27 @@ class HabitApp(QMainWindow):
         self._refresh_all()
 
     def _on_checkin_toggled(self, habit_id, date_str):
-        # Refresh dot indicators
         self.week_nav.refresh()
-        # Refresh the specific row
         if habit_id in self._habit_rows:
             self._habit_rows[habit_id].refresh(
                 self.data.selected_date.strftime("%Y-%m-%d")
             )
         self._update_footer()
+
+    def _on_drag_drop(self, dragged_id, target_id):
+        """Handle drag-and-drop reorder. Move dragged habit before target."""
+        dragged = next((h for h in self.data.habits if h["id"] == dragged_id), None)
+        target = next((h for h in self.data.habits if h["id"] == target_id), None)
+        if not dragged or not target or dragged_id == target_id:
+            return
+        # Move dragged to same group as target
+        dragged["group"] = target["group"]
+        # Reorder: remove dragged, insert before target
+        self.data.habits = [h for h in self.data.habits if h["id"] != dragged_id]
+        target_idx = next(i for i, h in enumerate(self.data.habits) if h["id"] == target_id)
+        self.data.habits.insert(target_idx, dragged)
+        self.data.save_habits()
+        self._refresh_all()
 
     def _toggle_group(self, group):
         group["collapsed"] = not group.get("collapsed", False)
@@ -989,14 +1063,35 @@ class HabitApp(QMainWindow):
             "QMenu { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 4px; }"
             "QMenu::item { padding: 8px 28px; color: #1f1f1f; }"
             "QMenu::item:selected { background: #0078d4; color: #ffffff; border-radius: 4px; }"
+            "QMenu::separator { height: 1px; background: #e0e0e0; margin: 4px 8px; }"
         )
+        # Move to group submenu
+        move_menu = menu.addMenu("→ " + ("移动到" if self.data.lang == "zh" else "Move to"))
+        move_menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 4px; }"
+            "QMenu::item { padding: 8px 28px; color: #1f1f1f; }"
+            "QMenu::item:selected { background: #0078d4; color: #ffffff; border-radius: 4px; }"
+        )
+        for g in self.data.groups:
+            gname = g.get("name_zh" if self.data.lang == "zh" else "name_en", "")
+            move_menu.addAction(gname)
+        menu.addSeparator()
         edit = menu.addAction(self.data.t("edit_habit"))
         up = menu.addAction("↑ " + ("上移" if self.data.lang == "zh" else "Move Up"))
         down = menu.addAction("↓ " + ("下移" if self.data.lang == "zh" else "Move Down"))
         menu.addSeparator()
         delete = menu.addAction(self.data.t("delete_habit"))
+
         action = menu.exec(pos)
-        if action == edit:
+        if action and action.text() in [g.get("name_zh", "") for g in self.data.groups] + [g.get("name_en", "") for g in self.data.groups]:
+            # Move to group
+            for g in self.data.groups:
+                if action.text() in (g.get("name_zh", ""), g.get("name_en", "")):
+                    habit["group"] = g.get("name_zh", g.get("name_en", ""))
+                    self.data.save_habits()
+                    self._refresh_all()
+                    return
+        elif action == edit:
             dlg = HabitDialog(self.data, habit, parent=self)
             if dlg.exec() == QDialog.Accepted:
                 self._refresh_all()
@@ -1032,32 +1127,41 @@ def _send_report_and_exit():
         print("Bot not enabled.")
         return
 
-    yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    done_habits = []
-    missed_habits = []
+    today_str = date.today().strftime("%Y-%m-%d")
+    today_weekday = date.today().strftime("%A")
+    today_display = f"{today_str} {today_weekday}"
+
+    done_today = []
+    pending_today = []
     for h in ds.habits:
-        if yesterday in h.get("checkins", []):
-            done_habits.append(h["name"])
+        if today_str in h.get("checkins", []):
+            done_today.append(h["name"])
         else:
-            missed_habits.append(h["name"])
+            pending_today.append(h["name"])
+
+    total = len(ds.habits)
+    done_count = len(done_today)
+    rate = round(done_count / total * 100) if total > 0 else 0
 
     lines = [
-        f"## {ds.t('bot_sent_title')}",
+        f"## 🤖 ATM 今日习惯打卡",
         "",
-        f"**{ds.t('bot_date_label')}**: {yesterday}",
+        f"**日期**: {today_display}",
+        f"**进度**: {done_count}/{total} ({rate}%)",
         "",
-        f"### {ds.t('bot_done')} ({len(done_habits)})",
     ]
-    if done_habits:
-        for name in done_habits:
-            lines.append(f"- ✓ {name}")
-    else:
-        lines.append(f"- {ds.t('bot_no_habits')}")
+    if pending_today:
+        lines.append(f"### ⏳ 待完成 ({len(pending_today)})")
+        for name in pending_today:
+            lines.append(f"- {name}")
 
-    if missed_habits:
-        lines.extend(["", f"### {ds.t('bot_missed')} ({len(missed_habits)})"])
-        for name in missed_habits:
-            lines.append(f"- ✗ {name}")
+    if done_today:
+        lines.extend(["", f"### ✅ 已完成 ({done_count})"])
+        for name in done_today:
+            lines.append(f"- ✓ {name}")
+
+    if total == 0:
+        lines.append(f"- {ds.t('bot_no_habits')}")
 
     message = "\n".join(lines)
     webhook = ds.settings.get("webhook_url", DEFAULT_WEBHOOK)
