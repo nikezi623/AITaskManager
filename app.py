@@ -428,13 +428,20 @@ class HabitRow(QFrame):
 
 
 class GroupHeader(QPushButton):
+    context_menu_requested = Signal(object, object)  # group, QPoint
+
     def __init__(self, data: DataStore, group: dict, parent=None):
         super().__init__(parent)
         self.data = data
         self.group = group
         self.setCursor(Qt.PointingHandCursor)
         self.setFlat(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self._build()
+
+    def _on_context_menu(self, pos):
+        self.context_menu_requested.emit(self.group, self.mapToGlobal(pos))
 
     def _build(self):
         name = self.group.get("name_zh" if self.data.lang == "zh" else "name_en", "")
@@ -445,9 +452,9 @@ class GroupHeader(QPushButton):
         self.setText(f"  {arrow}  {name}  ({count})")
         self.setFont(QFont("Segoe UI", self.data.settings.get("font_size", 12), QFont.Bold))
         self.setStyleSheet(
-            f"QPushButton {{ color: {TEXT}; border: none; background: transparent; "
-            f"text-align: left; padding: 8px 4px; }}"
-            f"QPushButton:hover {{ color: {PRIMARY}; }}"
+            "QPushButton { color: #1f1f1f; border: none; background: transparent; "
+            "text-align: left; padding: 8px 4px; }"
+            "QPushButton:hover { color: #0078d4; }"
         )
 
     def refresh(self):
@@ -462,7 +469,7 @@ class WeekNavBar(QWidget):
         super().__init__(parent)
         self.data = data
         self.ref_date = date.today()
-        self.setFixedHeight(80)
+        self.setMinimumHeight(100)
         self.setStyleSheet(f"background: {CARD_BG}; border-radius: 10px;")
         self._build()
 
@@ -514,9 +521,10 @@ class WeekNavBar(QWidget):
             if d == self.data.selected_date:
                 num.setStyleSheet(
                     "color: #ffffff; background: #0078d4; border-radius: 16px; "
-                    "min-width: 32px; min-height: 32px; padding: 4px; font-weight: bold;"
+                    "min-width: 32px; min-height: 32px; max-width: 36px; max-height: 36px; "
+                    "padding: 4px; font-weight: bold;"
                 )
-                num.setFixedSize(32, 32)
+                num.setMinimumSize(32, 32)
             elif d == today:
                 num.setStyleSheet("color: #0078d4; border: none; background: transparent; font-weight: bold;")
             else:
@@ -937,25 +945,65 @@ class HabitApp(QMainWindow):
             # Group header
             header = GroupHeader(self.data, group)
             header.clicked.connect(lambda checked, g=group: self._toggle_group(g))
+            header.context_menu_requested.connect(self._group_context_menu)
             self._habit_layout.insertWidget(self._habit_layout.count() - 1, header)
             self._group_headers[gname] = header
 
             if not group.get("collapsed", False):
-                # Add habit button per group
-                for h in habits:
-                    row = HabitRow(self.data, h, today_str)
-                    row.checkin_toggled.connect(self._on_checkin_toggled)
-                    row.context_menu_requested.connect(self._habit_context_menu)
-                    row.dropped_on.connect(self._on_drag_drop)
-                    self._habit_layout.insertWidget(self._habit_layout.count() - 1, row)
-                    self._habit_rows[h["id"]] = row
+                if not habits:
+                    # Empty group drop zone
+                    drop_zone = QLabel(
+                        "  " + ("拖拽习惯到此处" if self.data.lang == "zh" else "Drop habit here")
+                    )
+                    drop_zone.setFont(QFont("Segoe UI", 10))
+                    drop_zone.setStyleSheet(
+                        f"QLabel {{ color: {TEXT_SEC}; border: 2px dashed {BORDER}; "
+                        f"border-radius: 8px; padding: 16px; background: transparent; }}"
+                    )
+                    drop_zone.setAcceptDrops(True)
+                    def _make_drop_handler(zone, grp_name):
+                        def _drop(event):
+                            dragged_id = event.mimeData().text()
+                            for hh in self.data.habits:
+                                if hh["id"] == dragged_id:
+                                    hh["group"] = grp_name
+                                    self.data.save_habits()
+                                    self._refresh_all()
+                                    break
+                            event.acceptProposedAction()
+                        def _drag_enter(event):
+                            if event.mimeData().hasText():
+                                zone.setStyleSheet(
+                                    f"QLabel {{ color: {PRIMARY}; border: 2px dashed {PRIMARY}; "
+                                    f"border-radius: 8px; padding: 16px; background: #e8f4fd; }}"
+                                )
+                                event.acceptProposedAction()
+                        def _drag_leave(event):
+                            zone.setStyleSheet(
+                                f"QLabel {{ color: {TEXT_SEC}; border: 2px dashed {BORDER}; "
+                                f"border-radius: 8px; padding: 16px; background: transparent; }}"
+                            )
+                        zone.dragEnterEvent = _drag_enter
+                        zone.dragLeaveEvent = _drag_leave
+                        zone.dropEvent = _drop
+                        return drop_zone
+                    drop_zone = _make_drop_handler(drop_zone, gname)
+                    self._habit_layout.insertWidget(self._habit_layout.count() - 1, drop_zone)
+                else:
+                    for h in habits:
+                        row = HabitRow(self.data, h, today_str)
+                        row.checkin_toggled.connect(self._on_checkin_toggled)
+                        row.context_menu_requested.connect(self._habit_context_menu)
+                        row.dropped_on.connect(self._on_drag_drop)
+                        self._habit_layout.insertWidget(self._habit_layout.count() - 1, row)
+                        self._habit_rows[h["id"]] = row
 
                 add_btn = QPushButton(f"  + {self.data.t('add_habit')}")
                 add_btn.setFlat(True)
                 add_btn.setFont(QFont("Segoe UI", 11))
                 add_btn.setStyleSheet(
-                    f"QPushButton {{ color: {TEXT_SEC}; border: none; text-align: left; padding: 6px 8px; }}"
-                    f"QPushButton:hover {{ color: {PRIMARY}; }}"
+                    "QPushButton { color: #605e5c; border: none; text-align: left; padding: 6px 8px; }"
+                    "QPushButton:hover { color: #0078d4; }"
                 )
                 gname_capture = gname
                 add_btn.clicked.connect(lambda checked, gn=gname_capture: self._add_habit(gn))
@@ -1018,6 +1066,51 @@ class HabitApp(QMainWindow):
         group["collapsed"] = not group.get("collapsed", False)
         self.data.save_groups()
         self._refresh_all()
+
+    def _group_context_menu(self, group, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 4px; }"
+            "QMenu::item { padding: 8px 28px; color: #1f1f1f; }"
+            "QMenu::item:selected { background: #0078d4; color: #ffffff; border-radius: 4px; }"
+            "QMenu::separator { height: 1px; background: #e0e0e0; margin: 4px 8px; }"
+        )
+        edit = menu.addAction(self.data.t("edit_group"))
+        add = menu.addAction(self.data.t("add_habit"))
+        menu.addSeparator()
+        delete = menu.addAction(self.data.t("delete_group"))
+        action = menu.exec(pos)
+        if action == edit:
+            dlg = GroupDialog(self.data, group, parent=self)
+            if dlg.exec() == QDialog.Accepted:
+                self._refresh_all()
+        elif action == add:
+            gname = group.get("name_zh", group.get("name_en", ""))
+            self._add_habit(gname)
+        elif action == delete:
+            gname = group.get("name_zh", group.get("name_en", ""))
+            habit_count = len(self.data.get_habits_for_group(
+                group.get("name_zh", group.get("name_en", ""))))
+            msg = self.data.fmt("confirm_delete_group", name=gname)
+            if habit_count > 0:
+                msg += "\n\n" + (
+                    f"该分组下有 {habit_count} 个习惯，将被一并删除！"
+                    if self.data.lang == "zh" else
+                    f"This group has {habit_count} habit(s) which will also be deleted!"
+                )
+            reply = QMessageBox.question(self, self.data.t("delete_group"), msg)
+            if reply == QMessageBox.Yes:
+                self.data.habits = [h for h in self.data.habits
+                                    if h.get("group") not in (
+                                        group.get("name_zh", ""),
+                                        group.get("name_en", ""),
+                                    )]
+                self.data.groups = [g for g in self.data.groups
+                                    if g.get("name_zh") != group.get("name_zh")
+                                    and g.get("name_en") != group.get("name_en")]
+                self.data.save_habits()
+                self.data.save_groups()
+                self._refresh_all()
 
     def _add_habit(self, group_name=None):
         """Add a new habit, optionally pre-selecting a group."""
