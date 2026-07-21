@@ -428,14 +428,17 @@ class HabitRow(QFrame):
 
 
 class GroupHeader(QPushButton):
-    context_menu_requested = Signal(object, object)  # group, QPoint
+    context_menu_requested = Signal(object, object)
+    dropped_on = Signal(str, str)  # dragged_group_name, target_group_name
 
     def __init__(self, data: DataStore, group: dict, parent=None):
         super().__init__(parent)
         self.data = data
         self.group = group
+        self._drag_start = None
         self.setCursor(Qt.PointingHandCursor)
         self.setFlat(True)
+        self.setAcceptDrops(True)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self._build()
@@ -459,6 +462,53 @@ class GroupHeader(QPushButton):
 
     def refresh(self):
         self._build()
+
+    # ── Drag & Drop ──
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start is None:
+            super().mouseMoveEvent(event)
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < 15:
+            super().mouseMoveEvent(event)
+            return
+        from PySide6.QtGui import QDrag, QPixmap
+        from PySide6.QtCore import QMimeData
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setText("group:" + self.group.get("name_zh", ""))
+        drag.setMimeData(mime)
+        pixmap = self.grab()
+        drag.setPixmap(pixmap.scaled(pixmap.width() // 2, pixmap.height() // 2,
+                                     Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        drag.setHotSpot(event.position().toPoint() / 2)
+        self._drag_start = None
+        drag.exec(Qt.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText() and event.mimeData().text().startswith("group:"):
+            self.setStyleSheet(
+                "QPushButton { color: #0078d4; border: 2px dashed #0078d4; border-radius: 6px; "
+                "background: #e8f4fd; text-align: left; padding: 8px 4px; }"
+            )
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._build()
+
+    def dropEvent(self, event):
+        text = event.mimeData().text()
+        self._build()
+        if text.startswith("group:"):
+            dragged_name = text[6:]
+            target_name = self.group.get("name_zh", "")
+            if dragged_name != target_name:
+                self.dropped_on.emit(dragged_name, target_name)
+        event.acceptProposedAction()
 
 
 class WeekNavBar(QWidget):
@@ -983,6 +1033,7 @@ class HabitApp(QMainWindow):
             header = GroupHeader(self.data, group)
             header.clicked.connect(lambda checked, g=group: self._toggle_group(g))
             header.context_menu_requested.connect(self._group_context_menu)
+            header.dropped_on.connect(self._on_group_drop)
             self._habit_layout.insertWidget(self._habit_layout.count() - 1, header)
             self._group_headers[gname] = header
 
@@ -1101,6 +1152,24 @@ class HabitApp(QMainWindow):
 
     def _toggle_group(self, group):
         group["collapsed"] = not group.get("collapsed", False)
+        self.data.save_groups()
+        self._refresh_all()
+
+    def _on_group_drop(self, dragged_name, target_name):
+        """Reorder groups by drag-and-drop."""
+        dragged = next((g for g in self.data.groups
+                        if g.get("name_zh") == dragged_name or g.get("name_en") == dragged_name), None)
+        target = next((g for g in self.data.groups
+                       if g.get("name_zh") == target_name or g.get("name_en") == target_name), None)
+        if not dragged or not target or dragged == target:
+            return
+        # Reorder: move dragged to before target
+        self.data.groups = [g for g in self.data.groups if g != dragged]
+        target_idx = next(i for i, g in enumerate(self.data.groups) if g == target)
+        self.data.groups.insert(target_idx, dragged)
+        # Update order field
+        for i, g in enumerate(self.data.groups):
+            g["order"] = i
         self.data.save_groups()
         self._refresh_all()
 
