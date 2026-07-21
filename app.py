@@ -831,9 +831,16 @@ class GroupDialog(QDialog):
         if not name_zh:
             return
         if self.group:
+            old_zh = self.group.get("name_zh", "")
+            old_en = self.group.get("name_en", "")
             self.group["name_zh"] = name_zh
             self.group["name_en"] = name_en or name_zh
             self.group["color"] = self.color
+            # Update all habits referencing old group name to new name
+            for h in self.data.habits:
+                if h.get("group") in (old_zh, old_en):
+                    h["group"] = name_zh
+            self.data.save_habits()
         else:
             self.data.groups.append({
                 "name_zh": name_zh,
