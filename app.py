@@ -253,10 +253,10 @@ class DataStore:
 class CheckInButton(QPushButton):
     toggled = Signal(str, str)  # habit_id, date_str
 
-    def __init__(self, habit_id: str, checked: bool, parent=None):
+    def __init__(self, habit_id: str, date_str: str, checked: bool, parent=None):
         super().__init__(parent)
         self.habit_id = habit_id
-        self._checked = checked
+        self.date_str = date_str
         self.setFixedSize(36, 36)
         self.setCursor(Qt.PointingHandCursor)
         self.setCheckable(True)
@@ -279,14 +279,20 @@ class CheckInButton(QPushButton):
             )
             self.setText("")
 
+    def update_date(self, date_str: str, checked: bool):
+        self.date_str = date_str
+        self.setChecked(checked)
+        self._update_style()
+
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
         self._update_style()
-        self.toggled.emit(self.habit_id, date.today().strftime("%Y-%m-%d"))
+        self.toggled.emit(self.habit_id, self.date_str)
 
 
 class HabitRow(QFrame):
     checkin_toggled = Signal(str, str)
+    context_menu_requested = Signal(object, object)  # habit, QPoint
 
     def __init__(self, data: DataStore, habit: dict, selected_date_str: str, parent=None):
         super().__init__(parent)
@@ -299,7 +305,12 @@ class HabitRow(QFrame):
             f"HabitRow {{ background: {CARD_BG}; border-radius: 8px; "
             f"border: 1px solid {BORDER}; margin: 2px 0; }}"
         )
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self._build()
+
+    def _on_context_menu(self, pos):
+        self.context_menu_requested.emit(self.habit, self.mapToGlobal(pos))
 
     def _build(self):
         layout = QHBoxLayout(self)
@@ -332,7 +343,7 @@ class HabitRow(QFrame):
 
         # Check-in button
         checked = self.data.is_checked(self.habit["id"], self.date_str)
-        self.check_btn = CheckInButton(self.habit["id"], checked)
+        self.check_btn = CheckInButton(self.habit["id"], self.date_str, checked)
         self.check_btn.toggled.connect(self._on_checkin)
         layout.addWidget(self.check_btn)
 
@@ -361,8 +372,7 @@ class HabitRow(QFrame):
     def refresh(self, date_str: str):
         self.date_str = date_str
         checked = self.data.is_checked(self.habit["id"], date_str)
-        self.check_btn.setChecked(checked)
-        self.check_btn._update_style()
+        self.check_btn.update_date(date_str, checked)
         self._update_stats_text()
 
 
@@ -572,7 +582,14 @@ class HabitDialog(QDialog):
         self.habit = habit
         self.setWindowTitle(data.t("edit_habit") if habit else data.t("add_habit"))
         self.setMinimumWidth(350)
-        self.setStyleSheet(f"QDialog {{ background: {CARD_BG}; }}")
+        self.setStyleSheet(
+            f"QDialog {{ background: {CARD_BG}; }}"
+            "QLineEdit { color: #1f1f1f; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px; font-size: 13px; }"
+            "QComboBox { color: #1f1f1f; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { color: #1f1f1f; background: #ffffff; selection-background-color: #0078d4; }"
+            "QLabel { color: #1f1f1f; background: transparent; border: none; }"
+        )
         self._build()
 
     def _build(self):
@@ -583,10 +600,6 @@ class HabitDialog(QDialog):
         layout.addWidget(QLabel(self.data.t("habit_name")))
         self.name_input = QLineEdit(self.habit.get("name", "") if self.habit else "")
         self.name_input.setPlaceholderText(self.data.t("habit_name"))
-        self.name_input.setStyleSheet(
-            f"QLineEdit {{ border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; "
-            f"font-size: 13px; background: white; }}"
-        )
         layout.addWidget(self.name_input)
 
         # Group
@@ -597,9 +610,6 @@ class HabitDialog(QDialog):
             gname = self.habit.get("group", "")
             if gname in [self.group_combo.itemText(i) for i in range(self.group_combo.count())]:
                 self.group_combo.setCurrentText(gname)
-        self.group_combo.setStyleSheet(
-            f"QComboBox {{ border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; background: white; }}"
-        )
         layout.addWidget(self.group_combo)
 
         # Buttons
@@ -644,7 +654,12 @@ class GroupDialog(QDialog):
         self.group = group
         self.setWindowTitle(data.t("edit_group") if group else data.t("add_group"))
         self.setMinimumWidth(350)
-        self.setStyleSheet(f"QDialog {{ background: {CARD_BG}; }}")
+        self.setStyleSheet(
+            "QDialog { background: #ffffff; }"
+            "QLineEdit { color: #1f1f1f; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px; }"
+            "QLabel { color: #1f1f1f; background: transparent; border: none; }"
+            "QComboBox { color: #1f1f1f; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px; }"
+        )
         self._build()
 
     def _build(self):
@@ -656,18 +671,12 @@ class GroupDialog(QDialog):
         self.name_zh_input = QLineEdit(
             self.group.get("name_zh", "") if self.group else ""
         )
-        self.name_zh_input.setStyleSheet(
-            f"QLineEdit {{ border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; background: white; }}"
-        )
         layout.addWidget(self.name_zh_input)
 
         # Name (en)
         layout.addWidget(QLabel(self.data.t("group_name") + " (EN)"))
         self.name_en_input = QLineEdit(
             self.group.get("name_en", "") if self.group else ""
-        )
-        self.name_en_input.setStyleSheet(
-            f"QLineEdit {{ border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; background: white; }}"
         )
         layout.addWidget(self.name_en_input)
 
@@ -876,6 +885,7 @@ class HabitApp(QMainWindow):
                 for h in habits:
                     row = HabitRow(self.data, h, today_str)
                     row.checkin_toggled.connect(self._on_checkin_toggled)
+                    row.context_menu_requested.connect(self._habit_context_menu)
                     self._habit_layout.insertWidget(self._habit_layout.count() - 1, row)
                     self._habit_rows[h["id"]] = row
 
@@ -958,9 +968,9 @@ class HabitApp(QMainWindow):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         menu.setStyleSheet(
-            f"QMenu {{ background: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 8px; padding: 4px; }}"
-            f"QMenu::item {{ padding: 8px 24px; }}"
-            f"QMenu::item:selected {{ background: {PRIMARY}; color: white; border-radius: 4px; }}"
+            "QMenu { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 4px; }"
+            "QMenu::item { padding: 8px 28px; color: #1f1f1f; }"
+            "QMenu::item:selected { background: #0078d4; color: #ffffff; border-radius: 4px; }"
         )
         add_habit = menu.addAction(self.data.t("add_habit"))
         add_group = menu.addAction(self.data.t("add_group"))
@@ -975,12 +985,32 @@ class HabitApp(QMainWindow):
 
     def _habit_context_menu(self, habit, pos):
         menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 4px; }"
+            "QMenu::item { padding: 8px 28px; color: #1f1f1f; }"
+            "QMenu::item:selected { background: #0078d4; color: #ffffff; border-radius: 4px; }"
+        )
         edit = menu.addAction(self.data.t("edit_habit"))
+        up = menu.addAction("↑ " + ("上移" if self.data.lang == "zh" else "Move Up"))
+        down = menu.addAction("↓ " + ("下移" if self.data.lang == "zh" else "Move Down"))
+        menu.addSeparator()
         delete = menu.addAction(self.data.t("delete_habit"))
         action = menu.exec(pos)
         if action == edit:
             dlg = HabitDialog(self.data, habit, parent=self)
             if dlg.exec() == QDialog.Accepted:
+                self._refresh_all()
+        elif action == up:
+            idx = next((i for i, h in enumerate(self.data.habits) if h["id"] == habit["id"]), None)
+            if idx is not None and idx > 0:
+                self.data.habits[idx], self.data.habits[idx - 1] = self.data.habits[idx - 1], self.data.habits[idx]
+                self.data.save_habits()
+                self._refresh_all()
+        elif action == down:
+            idx = next((i for i, h in enumerate(self.data.habits) if h["id"] == habit["id"]), None)
+            if idx is not None and idx < len(self.data.habits) - 1:
+                self.data.habits[idx], self.data.habits[idx + 1] = self.data.habits[idx + 1], self.data.habits[idx]
+                self.data.save_habits()
                 self._refresh_all()
         elif action == delete:
             reply = QMessageBox.question(
@@ -1058,6 +1088,12 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Global stylesheet to fix Fusion theme visibility issues
+    app.setStyleSheet(
+        "QToolTip { color: #1f1f1f; background: #ffffff; border: 1px solid #e0e0e0; }"
+        "QMessageBox { background: #ffffff; }"
+        "QMessageBox QLabel { color: #1f1f1f; }"
+    )
     window = HabitApp()
     window.show()
     sys.exit(app.exec())
