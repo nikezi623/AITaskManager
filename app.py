@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QMenu, QCalendarWidget,
 )
 from PySide6.QtCore import Qt, QDate, Signal, QTimer, QSize, QRect
-from PySide6.QtGui import QFont, QColor, QPalette, QPainter, QPen, QBrush, QFontDatabase, QAction
+from PySide6.QtGui import QFont, QColor, QPalette, QPainter, QPen, QBrush, QFontDatabase, QAction, QIcon
 
 
 # ── Paths ───────────────────────────────────────────────────────
@@ -461,8 +461,17 @@ class GroupHeader(QPushButton):
         self._build()
 
 
+class _DayCell(QWidget):
+    """A plain QWidget that handles clicks — no layout-in-button clipping issues."""
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+
+
 class WeekNavBar(QWidget):
-    date_clicked = Signal(str)  # YYYY-MM-DD
+    date_clicked = Signal(str)
     week_changed = Signal()
 
     def __init__(self, data: DataStore, parent=None):
@@ -474,97 +483,85 @@ class WeekNavBar(QWidget):
         self._build()
 
     def _build(self):
-        # Clear
         for child in self.children():
-            if isinstance(child, (QLabel, QPushButton)) and child.parent() == self:
+            if isinstance(child, QWidget) and child.parent() == self:
                 child.deleteLater()
-        # Remove old layout
         if self.layout():
             QWidget().setLayout(self.layout())
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(0)
 
-        # Left arrow
         left = QPushButton("◀")
+        left.setFixedSize(28, 28)
         left.setFlat(True)
-        left.setFont(QFont("Segoe UI", 10))
-        left.setStyleSheet(f"color: {TEXT_SEC}; border: none; padding: 4px;")
+        left.setStyleSheet("QPushButton { color: #605e5c; border: none; }")
         left.clicked.connect(lambda: self._shift_week(-7))
-        layout.addWidget(left)
+        layout.addWidget(left, alignment=Qt.AlignCenter)
 
-        # 7 day cells
         days = self.data.week_dates(self.ref_date)
         today = date.today()
-        weekdays_zh = ["一", "二", "三", "四", "五", "六", "日"]
-        weekdays_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        wd_zh = ["一", "二", "三", "四", "五", "六", "日"]
+        wd_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
         self.day_widgets = []
         for i, d in enumerate(days):
-            cell = QVBoxLayout()
-            cell.setSpacing(2)
+            w = _DayCell()
+            w.setCursor(Qt.PointingHandCursor)
+            w.setStyleSheet("_DayCell { border: none; background: transparent; }")
+            vbox = QVBoxLayout(w)
+            vbox.setContentsMargins(2, 2, 2, 2)
+            vbox.setSpacing(2)
 
-            # Day of week
-            wd = weekdays_en[i] if self.data.lang == "en" else weekdays_zh[i]
+            wd = wd_en[i] if self.data.lang == "en" else wd_zh[i]
             dow = QLabel(wd)
             dow.setAlignment(Qt.AlignCenter)
-            dow.setFont(QFont("Segoe UI", 10, QFont.Bold))
-            dow.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
-            cell.addWidget(dow)
+            dow.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            dow.setStyleSheet("color: #605e5c; border: none; background: transparent;")
+            vbox.addWidget(dow)
 
-            # Date number
             num = QLabel(str(d.day))
             num.setAlignment(Qt.AlignCenter)
-            num.setFont(QFont("Segoe UI", 14, QFont.Bold if d == self.data.selected_date else QFont.Normal))
-
-            # Highlight selected/today
-            if d == self.data.selected_date:
+            is_sel = d == self.data.selected_date
+            is_today = d == today
+            if is_sel:
                 num.setStyleSheet(
-                    "color: #ffffff; background: #0078d4; border-radius: 16px; "
-                    "min-width: 32px; min-height: 32px; max-width: 36px; max-height: 36px; "
-                    "padding: 4px; font-weight: bold;"
+                    "color: #ffffff; background: #0078d4; border-radius: 12px; "
+                    "padding: 3px 0; font-weight: bold;"
                 )
-                num.setMinimumSize(32, 32)
-            elif d == today:
-                num.setStyleSheet("color: #0078d4; border: none; background: transparent; font-weight: bold;")
+                num.setMinimumWidth(28)
+            elif is_today:
+                num.setStyleSheet("color: #0078d4; border: 1px solid #0078d4; border-radius: 12px; "
+                                  "padding: 3px 0; font-weight: bold;")
+                num.setMinimumWidth(28)
             else:
                 num.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
-            cell.addWidget(num, alignment=Qt.AlignCenter)
+            num.setFont(QFont("Segoe UI", 12, QFont.Bold if is_sel else QFont.Normal))
+            vbox.addWidget(num, alignment=Qt.AlignCenter)
 
-            # Dot (completion indicator)
             ds = d.strftime("%Y-%m-%d")
             checked = self.data.get_habits_checked_today(ds)
             all_ids = self.data.get_habits_all_ids()
             all_done = len(all_ids) > 0 and checked == all_ids
-
             dot = QLabel()
-            dot.setFixedSize(12, 12)
-            if all_done:
-                dot.setStyleSheet("background: #107c10; border-radius: 6px;")
-            else:
-                dot.setStyleSheet("background: #d0d0d0; border-radius: 6px;")
-            cell.addWidget(dot, alignment=Qt.AlignCenter)
-
-            # Make clickable
-            wrapper = QPushButton()
-            wrapper.setFlat(True)
-            wrapper.setCursor(Qt.PointingHandCursor)
-            wrapper.setLayout(cell)
-            wrapper.setStyleSheet(
-                "QPushButton { border: none; background: transparent; padding: 4px; }"
-                "QPushButton:hover { background: #f5f5f5; border-radius: 8px; }"
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(
+                "background: #107c10; border-radius: 5px;" if all_done
+                else "background: #d0d0d0; border-radius: 5px;"
             )
-            wrapper.clicked.connect(lambda checked, dd=d: self._select_date(dd))
-            layout.addWidget(wrapper, 1)
-            self.day_widgets.append((wrapper, d))
+            vbox.addWidget(dot, alignment=Qt.AlignCenter)
 
-        # Right arrow
+            w.clicked.connect(lambda _, dd=d: self._select_date(dd))
+            layout.addWidget(w, 1)
+            self.day_widgets.append((w, d))
+
         right = QPushButton("▶")
+        right.setFixedSize(28, 28)
         right.setFlat(True)
-        right.setFont(QFont("Segoe UI", 10))
-        right.setStyleSheet(f"color: {TEXT_SEC}; border: none; padding: 4px;")
+        right.setStyleSheet("QPushButton { color: #605e5c; border: none; }")
         right.clicked.connect(lambda: self._shift_week(7))
-        layout.addWidget(right)
+        layout.addWidget(right, alignment=Qt.AlignCenter)
 
     def _shift_week(self, delta_days):
         self.ref_date += timedelta(days=delta_days)
