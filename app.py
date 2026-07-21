@@ -24,8 +24,28 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _find_task_pool(base_dir: Path) -> Path:
+    """Search for the task_pool with the most user data."""
+    candidates = [
+        base_dir / "task_pool",
+        base_dir.parent / "task_pool",
+        base_dir.parent.parent / "task_pool",
+    ]
+    best, best_count = base_dir / "task_pool", 0
+    for tp in candidates:
+        hf = tp / "habits.json"
+        if hf.exists():
+            try:
+                cnt = len(json.loads(hf.read_text(encoding="utf-8")))
+                if cnt >= best_count:
+                    best, best_count = tp, cnt
+            except Exception:
+                pass
+    return best
+
+
 BASE_DIR = app_dir()
-POOL_DIR = BASE_DIR / "task_pool"
+POOL_DIR = _find_task_pool(BASE_DIR)
 POOL_DIR.mkdir(parents=True, exist_ok=True)
 HABITS_PATH = POOL_DIR / "habits.json"
 GROUPS_PATH = POOL_DIR / "groups.json"
@@ -1320,32 +1340,13 @@ class HabitApp(QMainWindow):
 # ══════════════════════════════════════════════════════════════════
 #  CLI --send-report
 # ══════════════════════════════════════════════════════════════════
-def _find_task_pool(base_dir: Path) -> Path:
-    """Search for the actual task_pool with habit data."""
-    local = base_dir / "task_pool"
-    if (local / "habits.json").exists():
-        return local
-    parent = base_dir.parent / "task_pool"
-    if (parent / "habits.json").exists():
-        return parent
-    grandparent = base_dir.parent.parent / "task_pool"
-    if (grandparent / "habits.json").exists():
-        return grandparent
-    return local
-
-
 def _send_report_and_exit():
-    tp = _find_task_pool(BASE_DIR)
+    tp = POOL_DIR
 
-    # Read habits directly from the found task_pool
     try:
         habits = json.loads((tp / "habits.json").read_text(encoding="utf-8"))
     except Exception:
         habits = []
-    try:
-        groups = json.loads((tp / "groups.json").read_text(encoding="utf-8"))
-    except Exception:
-        groups = []
     try:
         settings = json.loads((tp / "settings.json").read_text(encoding="utf-8"))
     except Exception:
