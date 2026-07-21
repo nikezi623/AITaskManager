@@ -28,8 +28,11 @@ def _find_task_pool(base_dir: Path) -> Path:
     """Search for the task_pool with the most user data."""
     candidates = [
         base_dir / "task_pool",
+        base_dir / "dist" / "task_pool",
         base_dir.parent / "task_pool",
+        base_dir.parent / "dist" / "task_pool",
         base_dir.parent.parent / "task_pool",
+        base_dir.parent.parent / "dist" / "task_pool",
     ]
     best, best_count = base_dir / "task_pool", 0
     for tp in candidates:
