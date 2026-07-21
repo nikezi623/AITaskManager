@@ -462,12 +462,26 @@ class GroupHeader(QPushButton):
 
 
 class _DayCell(QWidget):
-    """A plain QWidget that handles clicks — no layout-in-button clipping issues."""
+    """A plain QWidget that handles clicks — uses event filter for reliable click detection."""
     clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_Hover, True)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        self.setStyleSheet(self.styleSheet() +
+                           "_DayCell { background: #f0f0f0; border-radius: 8px; }")
+
+    def leaveEvent(self, event):
+        # Remove hover background
+        s = self.styleSheet()
+        self.setStyleSheet(s.replace("_DayCell { background: #f0f0f0; border-radius: 8px; }", ""))
 
 
 class WeekNavBar(QWidget):
@@ -494,11 +508,21 @@ class WeekNavBar(QWidget):
         layout.setSpacing(0)
 
         left = QPushButton("◀")
-        left.setFixedSize(28, 28)
+        left.setFixedSize(24, 24)
         left.setFlat(True)
-        left.setStyleSheet("QPushButton { color: #605e5c; border: none; }")
+        left.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 10px; }")
         left.clicked.connect(lambda: self._shift_week(-7))
         layout.addWidget(left, alignment=Qt.AlignCenter)
+
+        # Year/month label
+        ym_text = self.ref_date.strftime("%Y年%m月") if self.data.lang == "zh" else self.ref_date.strftime("%B %Y")
+        ym_label = QLabel(ym_text)
+        ym_label.setAlignment(Qt.AlignCenter)
+        ym_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        ym_label.setStyleSheet("color: #1f1f1f; border: none; background: transparent; padding: 0 4px;")
+        ym_label.setFixedWidth(70)
+        layout.addWidget(ym_label, alignment=Qt.AlignCenter)
+        self._ym_label = ym_label
 
         days = self.data.week_dates(self.ref_date)
         today = date.today()
@@ -517,6 +541,7 @@ class WeekNavBar(QWidget):
             wd = wd_en[i] if self.data.lang == "en" else wd_zh[i]
             dow = QLabel(wd)
             dow.setAlignment(Qt.AlignCenter)
+            dow.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             dow.setFont(QFont("Segoe UI", 9, QFont.Bold))
             dow.setStyleSheet("color: #605e5c; border: none; background: transparent;")
             vbox.addWidget(dow)
@@ -537,6 +562,7 @@ class WeekNavBar(QWidget):
                 num.setMinimumWidth(28)
             else:
                 num.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
+            num.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             num.setFont(QFont("Segoe UI", 12, QFont.Bold if is_sel else QFont.Normal))
             vbox.addWidget(num, alignment=Qt.AlignCenter)
 
@@ -545,6 +571,7 @@ class WeekNavBar(QWidget):
             all_ids = self.data.get_habits_all_ids()
             all_done = len(all_ids) > 0 and checked == all_ids
             dot = QLabel()
+            dot.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             dot.setFixedSize(10, 10)
             dot.setStyleSheet(
                 "background: #107c10; border-radius: 5px;" if all_done
@@ -557,9 +584,9 @@ class WeekNavBar(QWidget):
             self.day_widgets.append((w, d))
 
         right = QPushButton("▶")
-        right.setFixedSize(28, 28)
+        right.setFixedSize(24, 24)
         right.setFlat(True)
-        right.setStyleSheet("QPushButton { color: #605e5c; border: none; }")
+        right.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 10px; }")
         right.clicked.connect(lambda: self._shift_week(7))
         layout.addWidget(right, alignment=Qt.AlignCenter)
 
@@ -572,8 +599,14 @@ class WeekNavBar(QWidget):
         self._rebuild()
         self.date_clicked.emit(d.strftime("%Y-%m-%d"))
 
+    def _update_ym_label(self):
+        ym_text = self.ref_date.strftime("%Y年%m月") if self.data.lang == "zh" else self.ref_date.strftime("%B %Y")
+        if hasattr(self, "_ym_label"):
+            self._ym_label.setText(ym_text)
+
     def _rebuild(self):
         self._build()
+        self._update_ym_label()
         self.week_changed.emit()
 
     def refresh(self):
