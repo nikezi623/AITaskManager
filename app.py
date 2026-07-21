@@ -461,30 +461,8 @@ class GroupHeader(QPushButton):
         self._build()
 
 
-class _DayCell(QWidget):
-    """A plain QWidget that handles clicks — uses event filter for reliable click detection."""
-    clicked = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_Hover, True)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def enterEvent(self, event):
-        self.setStyleSheet(self.styleSheet() +
-                           "_DayCell { background: #f0f0f0; border-radius: 8px; }")
-
-    def leaveEvent(self, event):
-        # Remove hover background
-        s = self.styleSheet()
-        self.setStyleSheet(s.replace("_DayCell { background: #f0f0f0; border-radius: 8px; }", ""))
-
-
 class WeekNavBar(QWidget):
+    """7-day navigation bar with year/month label, clickable date buttons, and completion dots."""
     date_clicked = Signal(str)
     week_changed = Signal()
 
@@ -492,103 +470,129 @@ class WeekNavBar(QWidget):
         super().__init__(parent)
         self.data = data
         self.ref_date = date.today()
-        self.setMinimumHeight(100)
+        self.setMinimumHeight(90)
         self.setStyleSheet(f"background: {CARD_BG}; border-radius: 10px;")
         self._build()
 
+    @staticmethod
+    def _clear_layout(layout):
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+            sub = item.layout()
+            if sub:
+                WeekNavBar._clear_layout(sub)
+
     def _build(self):
-        for child in self.children():
-            if isinstance(child, QWidget) and child.parent() == self:
-                child.deleteLater()
-        if self.layout():
-            QWidget().setLayout(self.layout())
+        self._clear_layout(self.layout())
+        self._day_btns = []
+        self._dot_labels = []
+        self._dow_labels = []
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(0)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(6, 4, 6, 4)
+        main_layout.setSpacing(2)
 
+        # ── Row 0: year/month + arrows ──
+        top_row = QHBoxLayout()
+        top_row.setSpacing(4)
         left = QPushButton("◀")
-        left.setFixedSize(24, 24)
+        left.setFixedSize(20, 20)
         left.setFlat(True)
-        left.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 10px; }")
+        left.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 9px; }")
         left.clicked.connect(lambda: self._shift_week(-7))
-        layout.addWidget(left, alignment=Qt.AlignCenter)
+        top_row.addWidget(left)
 
-        # Year/month label
         ym_text = self.ref_date.strftime("%Y年%m月") if self.data.lang == "zh" else self.ref_date.strftime("%B %Y")
-        ym_label = QLabel(ym_text)
-        ym_label.setAlignment(Qt.AlignCenter)
-        ym_label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        ym_label.setStyleSheet("color: #1f1f1f; border: none; background: transparent; padding: 0 4px;")
-        ym_label.setFixedWidth(70)
-        layout.addWidget(ym_label, alignment=Qt.AlignCenter)
-        self._ym_label = ym_label
+        ym = QLabel(ym_text)
+        ym.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        ym.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
+        top_row.addWidget(ym)
+        self._ym_label = ym
+        top_row.addStretch()
 
+        right = QPushButton("▶")
+        right.setFixedSize(20, 20)
+        right.setFlat(True)
+        right.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 9px; }")
+        right.clicked.connect(lambda: self._shift_week(7))
+        top_row.addWidget(right)
+        main_layout.addLayout(top_row)
+
+        # ── Row 1: 7 QPushButtons for date numbers ──
         days = self.data.week_dates(self.ref_date)
         today = date.today()
         wd_zh = ["一", "二", "三", "四", "五", "六", "日"]
         wd_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-        self.day_widgets = []
+        date_row = QHBoxLayout()
+        date_row.setSpacing(2)
         for i, d in enumerate(days):
-            w = _DayCell()
-            w.setCursor(Qt.PointingHandCursor)
-            w.setStyleSheet("_DayCell { border: none; background: transparent; }")
-            vbox = QVBoxLayout(w)
-            vbox.setContentsMargins(2, 2, 2, 2)
-            vbox.setSpacing(2)
+            btn = QPushButton(str(d.day))
+            btn.setFixedSize(32, 32)
+            btn.setCursor(Qt.PointingHandCursor)
+            is_sel = d == self.data.selected_date
+            is_today = d == today
+            if is_sel:
+                btn.setStyleSheet(
+                    "QPushButton { background: #0078d4; color: #ffffff; border: none; "
+                    "border-radius: 16px; font-size: 13px; font-weight: bold; }"
+                    "QPushButton:hover { background: #106ebe; }"
+                )
+            elif is_today:
+                btn.setStyleSheet(
+                    "QPushButton { color: #0078d4; background: transparent; "
+                    "border: 2px solid #0078d4; border-radius: 16px; font-size: 13px; font-weight: bold; }"
+                    "QPushButton:hover { background: #e8f4fd; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { color: #1f1f1f; background: transparent; border: none; "
+                    "border-radius: 16px; font-size: 13px; }"
+                    "QPushButton:hover { background: #f0f0f0; }"
+                )
+            btn.clicked.connect(lambda _, dd=d: self._select_date(dd))
+            date_row.addWidget(btn, 1, Qt.AlignCenter)
+            self._day_btns.append(btn)
+        main_layout.addLayout(date_row)
+
+        # ── Row 2: day-of-week + dots ──
+        info_row = QHBoxLayout()
+        info_row.setSpacing(2)
+        for i, d in enumerate(days):
+            cell = QVBoxLayout()
+            cell.setSpacing(1)
+            cell.setContentsMargins(0, 0, 0, 0)
 
             wd = wd_en[i] if self.data.lang == "en" else wd_zh[i]
             dow = QLabel(wd)
             dow.setAlignment(Qt.AlignCenter)
-            dow.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            dow.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            dow.setStyleSheet("color: #605e5c; border: none; background: transparent;")
-            vbox.addWidget(dow)
-
-            num = QLabel(str(d.day))
-            num.setAlignment(Qt.AlignCenter)
-            is_sel = d == self.data.selected_date
-            is_today = d == today
-            if is_sel:
-                num.setStyleSheet(
-                    "color: #ffffff; background: #0078d4; border-radius: 12px; "
-                    "padding: 3px 0; font-weight: bold;"
-                )
-                num.setMinimumWidth(28)
-            elif is_today:
-                num.setStyleSheet("color: #0078d4; border: 1px solid #0078d4; border-radius: 12px; "
-                                  "padding: 3px 0; font-weight: bold;")
-                num.setMinimumWidth(28)
-            else:
-                num.setStyleSheet("color: #1f1f1f; border: none; background: transparent;")
-            num.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            num.setFont(QFont("Segoe UI", 12, QFont.Bold if is_sel else QFont.Normal))
-            vbox.addWidget(num, alignment=Qt.AlignCenter)
+            dow.setFont(QFont("Segoe UI", 8))
+            dow.setStyleSheet("color: #888888; border: none; background: transparent;")
+            cell.addWidget(dow)
+            self._dow_labels.append(dow)
 
             ds = d.strftime("%Y-%m-%d")
             checked = self.data.get_habits_checked_today(ds)
             all_ids = self.data.get_habits_all_ids()
             all_done = len(all_ids) > 0 and checked == all_ids
             dot = QLabel()
-            dot.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            dot.setFixedSize(10, 10)
+            dot.setFixedSize(8, 8)
+            dot.setAlignment(Qt.AlignCenter)
             dot.setStyleSheet(
-                "background: #107c10; border-radius: 5px;" if all_done
-                else "background: #d0d0d0; border-radius: 5px;"
+                "background: #107c10; border-radius: 4px;" if all_done
+                else "background: #d0d0d0; border-radius: 4px;"
             )
-            vbox.addWidget(dot, alignment=Qt.AlignCenter)
+            cell.addWidget(dot, alignment=Qt.AlignCenter)
+            self._dot_labels.append(dot)
 
-            w.clicked.connect(lambda _, dd=d: self._select_date(dd))
-            layout.addWidget(w, 1)
-            self.day_widgets.append((w, d))
-
-        right = QPushButton("▶")
-        right.setFixedSize(24, 24)
-        right.setFlat(True)
-        right.setStyleSheet("QPushButton { color: #605e5c; border: none; font-size: 10px; }")
-        right.clicked.connect(lambda: self._shift_week(7))
-        layout.addWidget(right, alignment=Qt.AlignCenter)
+            info_row.addLayout(cell, 1)
+        main_layout.addLayout(info_row)
 
     def _shift_week(self, delta_days):
         self.ref_date += timedelta(days=delta_days)
@@ -599,14 +603,8 @@ class WeekNavBar(QWidget):
         self._rebuild()
         self.date_clicked.emit(d.strftime("%Y-%m-%d"))
 
-    def _update_ym_label(self):
-        ym_text = self.ref_date.strftime("%Y年%m月") if self.data.lang == "zh" else self.ref_date.strftime("%B %Y")
-        if hasattr(self, "_ym_label"):
-            self._ym_label.setText(ym_text)
-
     def _rebuild(self):
         self._build()
-        self._update_ym_label()
         self.week_changed.emit()
 
     def refresh(self):
