@@ -76,6 +76,7 @@ export const STRINGS = {
     deleted_group: '已删除分组「{name}」',
     // errors
     err_token_invalid: 'GitHub 令牌已失效，请到设置里重新输入',
+    err_repo_not_found: '令牌看不到 ATM-data 仓库。请检查 Token 的「Repository access」是否勾选了这个仓库（选「Public repositories」是不够的），且 Contents 权限为 Read and write',
     err_token_scope: '令牌权限不足：需要 ATM-data 仓库的 Contents 读写权限',
     err_rate_limited: '触发 GitHub 频率限制，稍后自动重试',
     err_network: '网络不可用，数据已存在本机',
@@ -150,6 +151,7 @@ export const STRINGS = {
     deleted_group: "Deleted group '{name}'",
     // errors
     err_token_invalid: 'GitHub token expired or revoked. Re-enter it in Settings.',
+    err_repo_not_found: 'Token cannot see the ATM-data repo. Check that "Repository access" includes it ("Public repositories" is not enough) and that Contents is Read and write',
     err_token_scope: 'Token lacks permission: needs Contents read/write on ATM-data',
     err_rate_limited: 'GitHub rate limit hit, retrying shortly',
     err_network: 'Network unavailable — data is safe on this device',

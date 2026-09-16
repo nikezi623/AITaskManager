@@ -97,6 +97,27 @@ function decodeBase64(base64) {
 }
 
 /**
+ * Verify the token can actually see the data repository.
+ *
+ * getFile() treats 404 as "the file isn't there yet", which is a legitimate
+ * first-run state -- but GitHub ALSO returns 404 for a private repository the
+ * token cannot see, deliberately, so it cannot be probed for existence. Those
+ * two cases need telling apart, and only a request for the repository itself
+ * does that.
+ *
+ * @throws {GitHubError} kind === 'not_found' when the repository is invisible
+ *         to this token (usually: the fine-grained PAT was not granted access
+ *         to it, or was created with "Public repositories" access).
+ */
+export async function checkRepoAccess(token, repo = REPO) {
+  const payload = await request(`${API}/repos/${repo}`, token);
+  return {
+    private: Boolean(payload.private),
+    defaultBranch: payload.default_branch,
+  };
+}
+
+/**
  * Read the state file.
  * @returns {Promise<{text: string|null, sha: string|null}>} text is null when
  *          the file does not exist yet (first run) -- not an error.

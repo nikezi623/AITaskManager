@@ -654,6 +654,9 @@ function describeError(error) {
   if (!error) return t('err_unknown', { msg: '—' });
   const kind = error.kind;
   if (kind === ErrorKind.AUTH) return t('err_token_invalid');
+  // GitHub returns 404 for a private repo the token cannot see, so this is
+  // almost always a token-scope problem rather than a missing file.
+  if (kind === ErrorKind.NOT_FOUND) return t('err_repo_not_found');
   if (kind === ErrorKind.FORBIDDEN) return t('err_token_scope');
   if (kind === ErrorKind.RATE_LIMIT) return t('err_rate_limited');
   if (kind === ErrorKind.NETWORK) return t('err_network');

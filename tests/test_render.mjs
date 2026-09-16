@@ -298,6 +298,44 @@ check('celebration: fires when the day becomes fully checked',
 check('celebration: the week dot for today turns green',
   $$('.wn-dot.done').length > 0);
 
+// ── The connection self-test must fail loudly on a 404 ───────────────────
+// Regression: testConnection() called getFile() alone, and getFile() reports
+// 404 as "no state file yet" -- a legitimate first-run state. A token that
+// could not see the private repository at all therefore reported "connected",
+// while every sync failed with a bare "Not Found" the user could not act on.
+{
+  const { ErrorKind: Kinds, checkRepoAccess } = await import('../docs/js/github.js');
+  const realFetch = globalThis.fetch;
+
+  const fakeFetch = (status, body) => () => Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => '5000' },
+    json: () => Promise.resolve(body),
+  });
+
+  globalThis.fetch = fakeFetch(404, { message: 'Not Found' });
+
+  let repoKind = null;
+  try { await checkRepoAccess('github_pat_fake'); } catch (error) { repoKind = error.kind; }
+  check('repo check: an invisible repository is reported as not_found',
+    repoKind === Kinds.NOT_FOUND, String(repoKind));
+
+  let testKind = null;
+  try { await sync.testConnection('github_pat_fake'); } catch (error) { testKind = error.kind; }
+  check('connection test: an invisible repository fails instead of reporting success',
+    testKind === Kinds.NOT_FOUND, String(testKind));
+
+  globalThis.fetch = fakeFetch(200, {
+    private: true, default_branch: 'main', content: '', sha: 'abc123',
+  });
+  let reachable = false;
+  try { reachable = Boolean(await sync.testConnection('github_pat_fake')); } catch { reachable = false; }
+  check('connection test: a reachable repository still succeeds', reachable);
+
+  globalThis.fetch = realFetch;
+}
+
 // ── Report ───────────────────────────────────────────────────────────────
 
 const total = passed + failures.length;

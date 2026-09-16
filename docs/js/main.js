@@ -11,7 +11,7 @@ import { sync } from './sync.js';
 import { store } from './store.js';
 
 // Bump together with CACHE_VERSION in ../sw.js.
-const VERSION = '2026-09-16.2';
+const VERSION = '2026-09-16.3';
 window.ATM_VERSION = VERSION;
 
 function registerServiceWorker() {

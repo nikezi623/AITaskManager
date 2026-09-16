@@ -10,7 +10,7 @@
  */
 
 import { mergeStates, normalizeState, stableStringify } from './merge.js';
-import { ErrorKind, GitHubError, getFile, putFile } from './github.js';
+import { ErrorKind, GitHubError, checkRepoAccess, getFile, putFile } from './github.js';
 import { store, todayStr } from './store.js';
 
 const TOKEN_KEY = 'atm.token';
@@ -179,18 +179,28 @@ class Sync {
       if (error instanceof GitHubError && error.kind === ErrorKind.CONFLICT) {
         this._scheduleRetry();
       } else if (!(error instanceof GitHubError)
-        || (error.kind !== ErrorKind.AUTH && error.kind !== ErrorKind.FORBIDDEN)) {
+        || ![ErrorKind.AUTH, ErrorKind.FORBIDDEN, ErrorKind.NOT_FOUND].includes(error.kind)) {
+        // A permissions problem will not fix itself; retrying it forever just
+        // burns requests and hides the real message behind a spinning pill.
         this._scheduleRetry();
       }
       return false;
     }
   }
 
-  /** Verify the token and repo access without touching data. */
+  /**
+   * Verify the token really can reach the data repository.
+   *
+   * The repository check comes first and is the one that matters: an earlier
+   * version only called getFile(), which reports 404 as "no file yet" -- so a
+   * token that could not see the repository at all still tested as connected,
+   * and every subsequent sync failed with a message the user could not act on.
+   */
   async testConnection(token = this.token) {
     if (!token) throw new GitHubError(ErrorKind.AUTH, 'no token');
-    await getFile(token);
-    return true;
+    const repo = await checkRepoAccess(token);
+    await getFile(token); // absence of the file is fine; the repo is what matters
+    return repo;
   }
 
   /** Install foreground triggers. Called once at boot. */
