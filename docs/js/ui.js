@@ -41,11 +41,21 @@ function buildShell(container) {
   const header = el('header', 'app-header');
   refs.title = el('h1', 'app-title', t('title'));
   const actions = el('div', 'header-actions');
+
+  // A pill with words, not a bare 9px dot. The dot was the only feedback a
+  // manual sync gave, and the only control that triggered one was labelled
+  // "weekly completion" -- so a perfectly successful sync looked like nothing
+  // happening at all.
+  refs.syncPill = el('button', 'sync-pill');
   refs.syncDot = el('span', 'sync-dot');
+  refs.syncText = el('span', 'sync-text');
+  refs.syncPill.append(refs.syncDot, refs.syncText);
+  refs.syncPill.addEventListener('click', manualSync);
+
   refs.settingsBtn = el('button', 'icon-btn', '⚙');
   refs.settingsBtn.setAttribute('aria-label', t('settings'));
   refs.langBtn = el('button', 'lang-btn', t('lang'));
-  actions.append(refs.syncDot, refs.settingsBtn, refs.langBtn);
+  actions.append(refs.syncPill, refs.settingsBtn, refs.langBtn);
   header.append(refs.title, actions);
 
   refs.weekNav = el('nav', 'week-nav');
@@ -56,7 +66,8 @@ function buildShell(container) {
   refs.scroll.appendChild(refs.list);
 
   const footer = el('footer', 'app-footer');
-  refs.rate = el('button', 'rate-btn');
+  // Informational, not a button: it used to be the hidden sync trigger.
+  refs.rate = el('span', 'rate-label');
   refs.statsBtn = el('button', 'icon-btn', '📊');
   refs.statsBtn.setAttribute('aria-label', t('stats_title'));
   refs.addBtn = el('button', 'fab', '+');
@@ -82,7 +93,23 @@ function buildShell(container) {
   });
   refs.statsBtn.addEventListener('click', openStats);
   refs.addBtn.addEventListener('click', () => openHabitDialog(null));
-  refs.rate.addEventListener('click', () => sync.run('manual'));
+}
+
+/** Manual sync, with an outcome the user can actually see. */
+async function manualSync() {
+  if (!sync.hasToken) {
+    toast(t('never_synced'), { actionLabel: t('settings'), onAction: openSettings });
+    return;
+  }
+  const pending = toast(t('syncing'), { duration: 30000 });
+  const ok = await sync.run('manual');
+  pending();
+  if (ok) {
+    const time = new Date(sync.lastSyncAt).toTimeString().slice(0, 5);
+    toast(t('synced_at', { time }));
+  } else {
+    toast(`${t('sync_failed')} · ${describeError(sync.lastError)}`, { duration: 9000 });
+  }
 }
 
 // ── Week navigation ──────────────────────────────────────────────────────
@@ -253,36 +280,40 @@ function updateRow(habitId) {
 
 function renderFooter() {
   refs.rate.textContent = `${t('week_completion')}: ${store.weekCompletionRate()}%`;
-  paintSyncDot();
+  paintSyncPill();
 }
 
-function paintSyncDot() {
-  const dot = refs.syncDot;
+function paintSyncPill() {
+  const { syncDot: dot, syncText: text, syncPill: pill } = refs;
   dot.className = 'sync-dot';
+  pill.classList.remove('pending', 'error');
+
+  const set = (state, label) => {
+    dot.classList.add(state);
+    text.textContent = label;
+  };
+
   if (!sync.hasToken) {
-    dot.classList.add('off');
-    dot.title = t('never_synced');
+    set('off', t('never_synced'));
     return;
   }
   if (sync.status === SyncStatus.SYNCING) {
-    dot.classList.add('busy');
-    dot.title = t('syncing');
-    return;
-  }
-  if (store.dirty) {
-    dot.classList.add('pending');
-    dot.title = t('sync_pending');
+    set('busy', t('syncing'));
     return;
   }
   if (sync.status === SyncStatus.ERROR || sync.status === SyncStatus.OFFLINE) {
-    dot.classList.add('error');
-    dot.title = t('sync_failed');
+    pill.classList.add('error');
+    set('error', t('sync_failed'));
     return;
   }
-  dot.classList.add('ok');
-  dot.title = sync.lastSyncAt
-    ? t('synced_at', { time: new Date(sync.lastSyncAt).toTimeString().slice(0, 5) })
-    : t('never_synced');
+  if (store.dirty) {
+    pill.classList.add('pending');
+    set('pending', t('sync_pending'));
+    return;
+  }
+  const time = sync.lastSyncAt
+    ? new Date(sync.lastSyncAt).toTimeString().slice(0, 5) : null;
+  set('ok', time ? t('synced_at', { time }) : t('tap_to_sync'));
 }
 
 // ── Sheets and dialogs ───────────────────────────────────────────────────
@@ -552,6 +583,10 @@ function openSettings() {
         status.textContent = t('testing');
         try {
           await sync.testConnection(input.value.trim());
+          // Save on success too. Testing reads the input field, not the stored
+          // token, so a green result used to leave sync silently dead until
+          // the user happened to press Save as well.
+          sync.setToken(input.value);
           status.textContent = t('connection_ok');
           status.classList.add('ok-text');
         } catch (error) {
@@ -568,6 +603,25 @@ function openSettings() {
         sync.run('manual');
         close();
       });
+
+      // Diagnostics the user can read aloud. Without devtools on the phone
+      // there is otherwise no way to tell a failed sync from a silent one.
+      const diag = el('div', 'diagnostics');
+      const diagRow = (name, value) => {
+        const row = el('div', 'diag-row');
+        row.append(el('span', 'diag-name', name), el('span', 'diag-value', value));
+        diag.appendChild(row);
+      };
+      diagRow(t('diag_token'), sync.token
+        ? `${sync.token.slice(0, 14)}… (${sync.token.length})` : '—');
+      diagRow(t('diag_habits'), String(store.habits().length));
+      diagRow(t('diag_last_sync'), sync.lastSyncAt
+        ? new Date(sync.lastSyncAt).toLocaleString() : t('never'));
+      diagRow(t('diag_dirty'), store.dirty ? t('yes') : t('no'));
+      diagRow(t('diag_state_size'),
+        `${(JSON.stringify(store.state).length / 1024).toFixed(1)} KB`);
+      diagRow(t('diag_error'), sync.lastError
+        ? `${sync.lastError.kind}: ${sync.lastError.message}` : '—');
 
       const forceLabel = el('p', 'field-help');
       forceLabel.textContent = `${t('version')}: ${window.ATM_VERSION || 'dev'}`;
@@ -590,13 +644,15 @@ function openSettings() {
       cancel.addEventListener('click', close);
 
       body.append(label, input, help, status, save, test, syncNow,
+        el('div', 'sheet-separator'), diag,
         el('div', 'sheet-separator'), forceLabel, force, cancel);
     },
   });
 }
 
 function describeError(error) {
-  const kind = error && error.kind;
+  if (!error) return t('err_unknown', { msg: '—' });
+  const kind = error.kind;
   if (kind === ErrorKind.AUTH) return t('err_token_invalid');
   if (kind === ErrorKind.FORBIDDEN) return t('err_token_scope');
   if (kind === ErrorKind.RATE_LIMIT) return t('err_rate_limited');
@@ -659,7 +715,7 @@ function onStoreChange() {
 }
 
 function onSyncChange() {
-  paintSyncDot();
+  paintSyncPill();
   if (sync.status === SyncStatus.ERROR && sync.lastError
     && sync.lastError.kind === ErrorKind.AUTH) {
     // A dead token needs the user; anything else retries itself.

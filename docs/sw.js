@@ -10,7 +10,7 @@
  * deleted on activate.
  */
 
-const CACHE_VERSION = '2026-09-16.1';
+const CACHE_VERSION = '2026-09-16.2';
 const CACHE_NAME = `atm-shell-${CACHE_VERSION}`;
 
 const SHELL = [

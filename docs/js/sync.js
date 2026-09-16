@@ -36,7 +36,7 @@ class Sync {
     this.pushTimer = null;
     this.retryTimer = null;
     this.retryIndex = 0;
-    this.running = false;
+    this.currentRun = null;   // in-flight promise, so callers can await it
   }
 
   subscribe(fn) {
@@ -97,14 +97,28 @@ class Sync {
   }
 
   /**
+   * Run a sync, or join the one already in flight.
+   *
+   * Joining rather than bailing out matters for the manual button: returning
+   * false while another sync is running would report "failed" to a user whose
+   * sync is in fact proceeding.
+   */
+  run(reason = 'manual') {
+    if (!this.hasToken) return Promise.resolve(false);
+    if (this.currentRun) return this.currentRun;
+    this.currentRun = this._runOnce(reason)
+      .finally(() => { this.currentRun = null; });
+    return this.currentRun;
+  }
+
+  /**
    * One pull-merge-push cycle.
    *
    * A 409 is the expected path when both devices are active, not an error: it
    * means the sha moved, so re-pull and merge (idempotent, so the result is
    * identical) and push again.
    */
-  async run(reason = 'manual') {
-    if (!this.hasToken || this.running) return false;
+  async _runOnce(reason = 'manual') {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       this.status = SyncStatus.OFFLINE;
       this.lastError = { kind: ErrorKind.NETWORK, message: 'offline' };
@@ -112,7 +126,6 @@ class Sync {
       return false;
     }
 
-    this.running = true;
     this.status = SyncStatus.SYNCING;
     this.emit();
 
@@ -150,7 +163,6 @@ class Sync {
         this.lastError = null;
         this.lastSyncAt = Date.now();
         this.retryIndex = 0;
-        this.running = false;
         store.emit();
         this.emit();
 
@@ -159,12 +171,10 @@ class Sync {
       }
 
       // Exhausted attempts: another device is writing continuously.
-      this.running = false;
       this._fail(new GitHubError(ErrorKind.CONFLICT, 'gave up after retries'));
       this._scheduleRetry();
       return false;
     } catch (error) {
-      this.running = false;
       this._fail(error);
       if (error instanceof GitHubError && error.kind === ErrorKind.CONFLICT) {
         this._scheduleRetry();
@@ -203,7 +213,7 @@ class Sync {
     // Poll while dirty: covers the case where the user keeps the app open and
     // a previous push failed for a transient reason.
     setInterval(() => {
-      if (store.dirty && !this.running) this.schedule('dirty-poll', 0);
+      if (store.dirty && !this.currentRun) this.schedule('dirty-poll', 0);
     }, DIRTY_POLL_MS);
     this.run('boot');
   }

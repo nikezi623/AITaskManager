@@ -138,10 +138,22 @@ eq('list: each row has a check circle', $$('.row .circle').length, 3);
 check('list: the group color bar is applied',
   $('.row .bar').style.background.includes('136, 23, 152') || $('.row .bar').style.background !== '');
 
-check('footer: completion rate renders', /本周完成率: \d+%/.test($('.rate-btn').textContent),
-  $('.rate-btn').textContent);
+check('footer: completion rate renders', /本周完成率: \d+%/.test($('.rate-label').textContent),
+  $('.rate-label').textContent);
 check('footer: an add button exists', $('.fab') !== null);
-check('sync dot: reflects the unconfigured state', $('.sync-dot').classList.contains('off'));
+check('sync pill: reflects the unconfigured state', $('.sync-dot').classList.contains('off'));
+eq('sync pill: says so in words, not just a colour',
+  $('.sync-text').textContent, '未连接');
+
+// Tapping the pill with no token must explain itself rather than doing
+// nothing -- the entire reason a working sync got reported as "no reaction".
+$('.sync-pill').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+await sleep(50);
+check('sync pill: tapping it without a token explains why',
+  $('.toast') !== null && $('.toast').textContent.includes('未连接'),
+  $('.toast') ? $('.toast').textContent : 'no toast');
+check('sync pill: offers a route into settings', $('.toast-action') !== null);
+$('.toast').remove();
 
 // The habit checked yesterday must not read as checked today.
 eq('state: today has nothing checked yet', store.isChecked(h1), false);
@@ -253,7 +265,7 @@ eq('language: weekday labels switch', $$('.wn-weekday').map((n) => n.textContent
 check('language: the month label switches to English',
   /^[A-Z][a-z]+ \d{4}$/.test($('.wn-month').textContent), $('.wn-month').textContent);
 check('language: the footer retranslates',
-  $('.rate-btn').textContent.startsWith('Weekly Completion:'), $('.rate-btn').textContent);
+  $('.rate-label').textContent.startsWith('Weekly Completion:'), $('.rate-label').textContent);
 
 $('.lang-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 eq('language: toggles back', store.lang, 'zh');
