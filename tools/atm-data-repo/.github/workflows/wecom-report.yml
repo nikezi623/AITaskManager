@@ -1,0 +1,48 @@
+name: WeCom Habit Report
+
+# Cron is UTC. Beijing is UTC+8 year-round (no DST since 1991), so each
+# Beijing time maps to a fixed UTC slot -- and 06:05 maps to the PREVIOUS day.
+# tools/send_report.py derives its date from Beijing wall-clock time for
+# exactly this reason; date.today() on the runner would be a day behind.
+on:
+  schedule:
+    - cron: "5 22 * * *"   # 06:05 Beijing (previous day UTC)
+    - cron: "3 4 * * *"    # 12:03 Beijing -- :03 not :00, see note below
+    - cron: "2 10 * * *"   # 18:02 Beijing
+    - cron: "30 13 * * *"  # 21:30 Beijing
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the message instead of sending it"
+        type: boolean
+        default: true
+
+# GitHub delays scheduled runs under load and specifically warns about the
+# start of every hour, so 12:00 and 18:00 Beijing were nudged off :00 UTC.
+# The message is a snapshot of the day so far, so a few minutes late is fine.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wecom-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # No setup-python: ubuntu-latest already ships Python 3.12, and one fewer
+      # action is one fewer thing that can fail.
+      - name: Send report
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          # inputs.dry_run is empty on a schedule event, so this defaults to
+          # "false" there and to a safe dry run when dispatched by hand.
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: python3 tools/send_report.py

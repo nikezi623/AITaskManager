@@ -1,0 +1,6 @@
+{
+  "//": "Exists so Node loads docs/js/*.js as ES modules, with no build step. The browser loads the same files natively.",
+  "name": "atm-habit-tracker",
+  "private": true,
+  "type": "module"
+}

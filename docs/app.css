@@ -1,0 +1,548 @@
+/* ATM habit tracker -- iOS-first stylesheet.
+ *
+ * Colours match the desktop app's constants (app.py) so the two look like the
+ * same product.
+ */
+
+:root {
+  --bg: #f0f2f5;
+  --card: #ffffff;
+  --primary: #0078d4;
+  --primary-hover: #106ebe;
+  --primary-soft: #e8f4fd;
+  --text: #1f1f1f;
+  --text-sec: #605e5c;
+  --success: #107c10;
+  --border: #e0e0e0;
+  --dot-gray: #d0d0d0;
+  --danger: #d13438;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+/* Without a background on <html> the iOS rubber-band scroll flashes white at
+ * the top and bottom and looks broken. */
+html {
+  background: var(--bg);
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  /* Safe-area insets only resolve because index.html sets viewport-fit=cover. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  /* Kill the long-press selection/callout and the grey tap flash app-wide;
+   * re-enabled for inputs below. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  /* Below 16px iOS zooms the whole page on focus. */
+  font-size: 16px;
+}
+
+button {
+  font-family: inherit;
+  /* The reliable double-tap-zoom defence. `user-scalable=no` has been ignored
+   * since iOS 10, so the meta tag alone is not enough. */
+  touch-action: manipulation;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.app-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 6px;
+}
+
+.app-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+  letter-spacing: -0.2px;
+}
+
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
+.icon-btn {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  padding: 8px;
+  border-radius: 10px;
+  color: var(--text-sec);
+  min-width: 40px;
+  min-height: 40px;
+}
+.icon-btn:active { background: rgba(0, 0, 0, .06); }
+
+.lang-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-sec);
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  min-height: 34px;
+}
+.lang-btn:active { color: var(--primary); border-color: var(--primary); }
+
+/* Status dot: the whole sync state in one glyph. */
+.sync-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dot-gray);
+  flex: 0 0 auto;
+}
+.sync-dot.ok { background: var(--success); }
+.sync-dot.pending { background: #ff8c00; }
+.sync-dot.busy { background: var(--primary); animation: pulse 1s ease-in-out infinite; }
+.sync-dot.error { background: var(--danger); }
+.sync-dot.off { background: var(--dot-gray); }
+
+@keyframes pulse { 50% { opacity: .3; } }
+
+/* ── Week navigation ────────────────────────────────────────────────── */
+
+.week-nav {
+  flex: 0 0 auto;
+  margin: 0 12px 8px;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 8px 6px 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+}
+
+.wn-row { display: flex; align-items: center; }
+.wn-top { margin-bottom: 6px; }
+.wn-spacer { flex: 1; }
+
+.wn-arrow {
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  font-size: 12px;
+  /* 44px: Apple's minimum comfortable hit target. */
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+.wn-arrow:active { background: rgba(0, 0, 0, .06); }
+
+.wn-month {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.wn-days { gap: 2px; }
+
+.day-btn {
+  flex: 1;
+  aspect-ratio: 1;
+  max-width: 44px;
+  margin: 0 auto;
+  border: 2px solid transparent;
+  background: transparent;
+  border-radius: 50%;
+  font-size: 15px;
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  transition: background-color .15s ease, color .15s ease;
+}
+.day-btn.today {
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 700;
+}
+.day-btn.selected {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+.day-btn.selected:active { background: var(--primary-hover); }
+.day-btn.today:active { background: var(--primary-soft); }
+
+.wn-meta { gap: 2px; margin-top: 2px; }
+.wn-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.wn-weekday { font-size: 10px; color: #888; }
+
+.wn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-gray);
+  transition: background-color .2s ease;
+}
+/* Green only when every current habit is checked that day. */
+.wn-dot.done { background: var(--success); }
+
+/* ── Habit list ─────────────────────────────────────────────────────── */
+
+.habit-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px 8px;
+}
+
+.group { margin-bottom: 10px; }
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 10px 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: left;
+  min-height: 44px;
+}
+.group-header:active { color: var(--primary); }
+.group-header .arrow { font-size: 10px; color: var(--text-sec); width: 12px; }
+.group-header .gname { flex: 1; }
+.group-header .gcount { font-size: 13px; font-weight: 400; color: var(--text-sec); }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* Content-driven height, not a fixed 52px: the desktop app clipped its own
+   * text as soon as the font size grew. */
+  min-height: 52px;
+  padding: 4px 6px 4px 12px;
+  margin-bottom: 6px;
+}
+
+.row .bar {
+  width: 4px;
+  height: 26px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.row-name {
+  flex: 1;
+  font-size: 16px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.row-stats {
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.row-stats:active { background: rgba(0, 0, 0, .05); }
+
+/* Visible circle is 36px, hit area is 44px: the ring lives in ::after so the
+ * button itself can stay finger-sized. */
+.circle {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+.circle::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 2px solid var(--dot-gray);
+  background: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  transition: background-color .15s ease, border-color .15s ease, transform .12s ease;
+}
+
+.circle.checked::after {
+  content: '✓';
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.circle:active::after { transform: scale(.84); }
+
+.add-inline {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  font-size: 13px;
+  text-align: left;
+  padding: 10px 8px;
+  border-radius: 8px;
+  min-height: 40px;
+}
+.add-inline:active { color: var(--primary); background: rgba(0, 120, 212, .06); }
+
+.empty-state {
+  color: var(--text-sec);
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 20px;
+  line-height: 1.6;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+
+.app-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.rate-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  font-size: 13px;
+  text-align: left;
+  padding: 8px 0;
+  min-height: 40px;
+}
+
+.fab {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+.fab:active { background: var(--primary-hover); }
+
+/* ── Bottom sheet ───────────────────────────────────────────────────── */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .35);
+  opacity: 0;
+  transition: opacity .2s ease;
+  z-index: 40;
+}
+.sheet-backdrop.open { opacity: 1; }
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  background: var(--card);
+  border-radius: 16px 16px 0 0;
+  max-height: 84vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  transform: translateY(100%);
+  transition: transform .22s cubic-bezier(.32, .72, 0, 1);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, .16);
+}
+.sheet.open { transform: translateY(0); }
+.sheet.closing { pointer-events: none; }
+
+.sheet-title {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 18px 20px 8px;
+  overflow-wrap: anywhere;
+}
+
+.sheet-body { padding: 0 12px; }
+
+.sheet-item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 16px;
+  color: var(--text);
+  padding: 15px 12px;
+  border-radius: 10px;
+  min-height: 48px;
+}
+.sheet-item:active { background: rgba(0, 0, 0, .06); }
+.sheet-item.danger { color: var(--danger); }
+.sheet-item.cancel { color: var(--text-sec); text-align: center; }
+.sheet-item.primary { color: var(--primary); font-weight: 600; text-align: center; }
+.sheet-item:disabled { opacity: .5; }
+
+.sheet-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 12px;
+}
+
+.sheet-message {
+  color: var(--text-sec);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 0 12px 10px;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-sec);
+  padding: 12px 12px 6px;
+}
+
+.field-input {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+.field-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--card);
+}
+.field-input.invalid { border-color: var(--danger); }
+
+.field-help {
+  font-size: 12px;
+  color: var(--text-sec);
+  line-height: 1.5;
+  padding: 8px 12px 0;
+  margin: 0;
+}
+.ok-text { color: var(--success); }
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 12px 8px;
+}
+.swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  transition: transform .12s ease;
+}
+.swatch.active {
+  border-color: var(--text);
+  transform: scale(1.08);
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.stat-name { flex: 1; font-size: 14px; overflow-wrap: anywhere; }
+.stat-value { font-size: 12px; color: var(--text-sec); white-space: nowrap; }
+.stat-group { width: 4px; height: 20px; border-radius: 2px; flex: 0 0 auto; }
+
+/* ── Toast ──────────────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 12px);
+  background: rgba(32, 32, 32, .94);
+  color: #fff;
+  font-size: 14px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(90vw, 480px);
+  opacity: 0;
+  transition: opacity .2s ease, transform .2s ease;
+  z-index: 50;
+}
+.toast.open { opacity: 1; transform: translate(-50%, 0); }
+
+.toast-action {
+  border: none;
+  background: transparent;
+  color: #6cb8f6;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 6px;
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

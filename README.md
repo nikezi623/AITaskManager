@@ -2,6 +2,32 @@
 
 > [English Version](README_EN.md)
 
+## 📱 手机版（PWA）
+
+`docs/` 是一套可以在 iPhone 上用的习惯打卡 PWA，和桌面端**共用同一份数据**，
+企业微信推送也搬到了云端（GitHub Actions），不再依赖电脑开机。
+
+- 打开方式：Safari 访问 `https://nikezi623.github.io/AITaskManager/` → 分享 → 添加到主屏幕
+- 数据存在私有仓库 `ATM-data`，手机和电脑双向同步
+- 电脑端手动同步：**先关掉程序**，双击 `tools\sync.bat`
+- 手机端使用说明、故障排查、调试方法见 [`docs/README.md`](docs/README.md)
+
+数据格式、同步机制与冲突处理的设计说明见
+[`tools/atm-data-repo/README.md`](tools/atm-data-repo/README.md)。
+
+### 测试
+
+```bash
+node tests/test_merge.mjs      # 合并算法（JS）
+python tests/test_merge.py     # 合并算法（Python，跑同一份夹具）
+node tests/test_store.mjs      # 状态逻辑：排序、连续天数、周完成率、删除级联
+node tests/test_render.mjs     # 渲染与交互（需要 jsdom）
+python tests/test_sync.py      # 电脑端同步的差分逻辑
+python tests/test_report.py    # 企业微信消息与桌面端逐字节一致
+```
+
+---
+
 一个基于 Python Tkinter 的 Windows 桌面任务管理工具，集成 **DeepSeek API**，能够结合用户背景自动将任务按**艾森豪威尔四象限**进行智能规划。
 
 ## ✨ 功能特性

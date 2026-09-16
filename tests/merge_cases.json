@@ -1,0 +1,234 @@
+{
+  "//": "Shared fixtures for the merge. Run by tests/test_merge.mjs (now) and a Python port (phase 2). Both runners must stay green on this file. `expected` may omit empty containers; the runner normalizes both sides.",
+  "cases": [
+    {
+      "name": "concurrent edits to different cells both survive",
+      "why": "The core promise: two devices checking different days must not clobber each other.",
+      "base": {
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "incoming": {
+        "checkins": { "h1": { "2026-09-15": 2000 } }
+      },
+      "expected": {
+        "checkins": { "h1": { "2026-09-14": 1000, "2026-09-15": 2000 } }
+      }
+    },
+    {
+      "name": "un-check beats an older check",
+      "why": "The bug this whole design exists to prevent: a stale +1000 must not resurrect a day the user cleared.",
+      "base": {
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "incoming": {
+        "checkins": { "h1": { "2026-09-14": -5000 } }
+      },
+      "expected": {
+        "checkins": { "h1": { "2026-09-14": -5000 } }
+      }
+    },
+    {
+      "name": "un-check beats an older check (reversed argument order)",
+      "why": "Commutativity: merge(a,b) must equal merge(b,a).",
+      "base": {
+        "checkins": { "h1": { "2026-09-14": -5000 } }
+      },
+      "incoming": {
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "expected": {
+        "checkins": { "h1": { "2026-09-14": -5000 } }
+      }
+    },
+    {
+      "name": "re-check after a tombstone",
+      "why": "A tombstone is a value, not a consumed event -- it must be overridable by anything newer.",
+      "base": {
+        "checkins": { "h1": { "2026-09-14": -5000 } }
+      },
+      "incoming": {
+        "checkins": { "h1": { "2026-09-14": 6000 } }
+      },
+      "expected": {
+        "checkins": { "h1": { "2026-09-14": 6000 } }
+      }
+    },
+    {
+      "name": "exact cell tie resolves to checked",
+      "why": "Determinism on an unreachable-but-possible tie. Math.max(+1000,-1000) === +1000.",
+      "base": {
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "incoming": {
+        "checkins": { "h1": { "2026-09-14": -1000 } }
+      },
+      "expected": {
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      }
+    },
+    {
+      "name": "newer record wins on updatedAt",
+      "base": {
+        "habits": {
+          "h1": { "id": "h1", "name": "购买练习本", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        }
+      },
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "买练习本", "groupId": "g1", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "买练习本", "groupId": "g1", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        }
+      }
+    },
+    {
+      "name": "record tie on updatedAt breaks by writer, deterministically",
+      "why": "Guarantees both devices compute the same winner when I1 was somehow violated.",
+      "base": {
+        "habits": {
+          "h1": { "id": "h1", "name": "A", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        }
+      },
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "B", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "phone", "deleted": false }
+        }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "A", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        }
+      }
+    },
+    {
+      "name": "group rename and habit move are independent",
+      "why": "Records merge per-record, so a rename on one device must not revert a move on the other.",
+      "base": {
+        "groups": {
+          "g1": { "id": "g1", "name_zh": "雅思", "name_en": "IELTS", "color": "#881798", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "habits": {
+          "h1": { "id": "h1", "name": "单词复习", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        }
+      },
+      "incoming": {
+        "groups": {
+          "g1": { "id": "g1", "name_zh": "雅思考试", "name_en": "IELTS", "color": "#881798", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false },
+          "g2": { "id": "g2", "name_zh": "学习", "name_en": "Study", "color": "#0078d4", "order": 10, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        },
+        "habits": {
+          "h1": { "id": "h1", "name": "单词复习", "groupId": "g2", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        }
+      },
+      "expected": {
+        "groups": {
+          "g1": { "id": "g1", "name_zh": "雅思考试", "name_en": "IELTS", "color": "#881798", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false },
+          "g2": { "id": "g2", "name_zh": "学习", "name_en": "Study", "color": "#0078d4", "order": 10, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        },
+        "habits": {
+          "h1": { "id": "h1", "name": "单词复习", "groupId": "g2", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        }
+      }
+    },
+    {
+      "name": "deleting a habit keeps its check-in history",
+      "why": "Cells merge independently of the record, so restoring a deleted habit later restores its history intact.",
+      "base": {
+        "habits": {
+          "h1": { "id": "h1", "name": "冥想 5 分钟", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "冥想 5 分钟", "groupId": "g1", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": true }
+        },
+        "checkins": { "h1": { "2026-09-15": 2000 } }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "冥想 5 分钟", "groupId": "g1", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": true }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000, "2026-09-15": 2000 } }
+      }
+    },
+    {
+      "name": "a stale device cannot undelete",
+      "why": "The offline phone still has deleted:false from before the delete; its older updatedAt must lose.",
+      "base": {
+        "habits": {
+          "h1": { "id": "h1", "name": "跑步 2km", "groupId": "g1", "order": 0, "updatedAt": 3000, "writer": "pc", "deleted": true }
+        }
+      },
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "跑步 2km", "groupId": "g1", "order": 0, "updatedAt": 2000, "writer": "phone", "deleted": false }
+        }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "跑步 2km", "groupId": "g1", "order": 0, "updatedAt": 3000, "writer": "pc", "deleted": true }
+        }
+      }
+    },
+    {
+      "name": "meta merges like any other record",
+      "base": {
+        "meta": { "bot_enabled": false, "updatedAt": 1000, "writer": "pc" }
+      },
+      "incoming": {
+        "meta": { "bot_enabled": true, "updatedAt": 2000, "writer": "phone" }
+      },
+      "expected": {
+        "meta": { "bot_enabled": true, "updatedAt": 2000, "writer": "phone" }
+      }
+    },
+    {
+      "name": "both metas null",
+      "base": {},
+      "incoming": {},
+      "expected": {}
+    },
+    {
+      "name": "merging with an empty state is identity",
+      "base": {},
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "百词斩打卡", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "百词斩打卡", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000 } }
+      }
+    },
+    {
+      "name": "merging a state with itself is identity",
+      "why": "Idempotence -- the property that makes pull-merge-push retries safe.",
+      "base": {
+        "habits": {
+          "h1": { "id": "h1", "name": "阅读 30 分钟", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000, "2026-09-15": -2000 } }
+      },
+      "incoming": {
+        "habits": {
+          "h1": { "id": "h1", "name": "阅读 30 分钟", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000, "2026-09-15": -2000 } }
+      },
+      "expected": {
+        "habits": {
+          "h1": { "id": "h1", "name": "阅读 30 分钟", "groupId": "g1", "order": 0, "updatedAt": 1000, "writer": "pc", "deleted": false }
+        },
+        "checkins": { "h1": { "2026-09-14": 1000, "2026-09-15": -2000 } }
+      }
+    }
+  ]
+}

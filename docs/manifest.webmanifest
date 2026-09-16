@@ -1,0 +1,16 @@
+{
+  "name": "ATM 习惯打卡",
+  "short_name": "习惯打卡",
+  "description": "四象限习惯打卡，数据同步到私有 GitHub 仓库",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0f2f5",
+  "theme_color": "#f0f2f5",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

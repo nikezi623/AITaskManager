@@ -25,3 +25,6 @@ Thumbs.db
 
 # Task pool (user data)
 task_pool/
+
+# Local sync state (habit data lives in the private ATM-data repo)
+.atm/

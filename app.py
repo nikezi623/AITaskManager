@@ -80,7 +80,9 @@ DEFAULT_HABITS = [
     {"id": "h5", "name": "运动 20 分钟", "group": "日常", "checkins": []},
 ]
 GROUP_COLORS = ["#0078d4", "#ff8c00", "#881798", "#107c10", "#d13438", "#00b7c3", "#498205", "#e81123"]
-DEFAULT_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=708bb96a-fd4b-4754-b8fa-c3c02e60fcaf"
+# 企业微信 webhook 不再硬编码：旧 key 已随公开仓库泄漏并在企业微信侧轮换。
+# 运行时从 task_pool/settings.json 的 webhook_url 读取。
+DEFAULT_WEBHOOK = ""
 
 # ── i18n ────────────────────────────────────────────────────────
 TS = {
@@ -1399,7 +1401,10 @@ def _send_report_and_exit():
         lines.append(f"- {t('bot_no_habits')}")
 
     message = "\n".join(lines)
-    webhook = settings.get("webhook_url", DEFAULT_WEBHOOK)
+    webhook = settings.get("webhook_url") or DEFAULT_WEBHOOK
+    if not webhook:
+        print("No webhook configured (settings.json: webhook_url).")
+        return
     payload = json.dumps({"msgtype": "markdown", "markdown": {"content": message}}).encode("utf-8")
 
     try:
