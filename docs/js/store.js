@@ -51,6 +51,11 @@ export function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
 
+/** 'HH:MM' in Beijing, for commit messages read during debugging. */
+export function nowTimeStr(now = Date.now()) {
+  return bjShifted(now).toISOString().slice(11, 16);
+}
+
 /** 'YYYY-MM-DD' -> Date at Beijing midnight (as a shifted Date). */
 export function parseDate(dateStr) {
   return new Date(`${dateStr}T00:00:00.000Z`);

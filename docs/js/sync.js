@@ -11,7 +11,7 @@
 
 import { mergeStates, normalizeState, stableStringify } from './merge.js';
 import { ErrorKind, GitHubError, checkRepoAccess, getFile, putFile } from './github.js';
-import { store, todayStr } from './store.js';
+import { nowTimeStr, store, todayStr } from './store.js';
 
 const TOKEN_KEY = 'atm.token';
 const CONFLICT_ATTEMPTS = 3;
@@ -143,7 +143,9 @@ class Sync {
           // Snapshot before pushing: this is the recovery path if a merge ever
           // does something surprising, and it needs no computer.
           store.backup();
-          const message = `sync ${store.deviceId} ${todayStr()} ${new Date().toISOString().slice(11, 16)}Z`;
+          // Beijing date AND time. Mixing a local date with a UTC clock in the
+          // same string makes the audit log ambiguous exactly when it matters.
+          const message = `sync ${store.deviceId} ${todayStr()} ${nowTimeStr()} +0800`;
           const result = await putFile(this.token, mergedText, cloud.sha, message);
           sha = result.sha;
         }
