@@ -25,6 +25,12 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(REPO / "tools" / "atm-data-repo" / "tools"))
 
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 passed = 0
 failures: list[str] = []
 
@@ -54,16 +60,24 @@ def skip(reason: str) -> None:
 
 # ── Preconditions ────────────────────────────────────────────────────────
 
-state_path = REPO / ".atm" / "atm-state.json"
-if not state_path.exists():
-    skip("no .atm/atm-state.json -- run `python tools/atm_state.py --import --write` first")
-
 try:
     import app as desktop
 except ImportError as exc:
     skip(f"cannot import the desktop app ({exc})")
 
+import atm_state  # noqa: E402
 import send_report  # noqa: E402
+
+# Build the state from the live task_pool, NOT from a saved .atm snapshot:
+# the snapshot goes stale the moment the user edits anything in the desktop
+# app, and the test would then be comparing two different datasets.
+pool = atm_state.find_task_pool(REPO)
+if not (pool / "habits.json").exists():
+    skip(f"no habits.json in {pool}")
+legacy_habits, legacy_groups, settings = atm_state.load_legacy(pool)
+state, _ = atm_state.legacy_to_state(
+    legacy_habits, legacy_groups, settings,
+    int(datetime.now(ZoneInfo("Asia/Shanghai")).timestamp()))
 
 
 # ── Capture what the desktop app would send ──────────────────────────────
@@ -105,10 +119,7 @@ desktop_message = desktop_payload["markdown"]["content"]
 check("desktop: sends a markdown message", desktop_payload["msgtype"] == "markdown")
 
 # ── What the cloud script produces for the same data ─────────────────────
-# Both read the same migrated state, and nothing has changed it since, so the
-# two must agree exactly.
 
-state = json.loads(state_path.read_text(encoding="utf-8"))
 now = datetime.now(ZoneInfo("Asia/Shanghai"))
 cloud_message = send_report.build_message(state, now)
 

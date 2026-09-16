@@ -254,23 +254,53 @@ def diff_against_snapshot(legacy_state: dict, base: dict, now: int, writer: str)
 
     # ── Ordering ──
     # The legacy array order IS the display order, and `state_to_legacy` writes
-    # the array back out sorted by `order`. So a reorder made on the desktop
-    # would be silently reverted on the next sync unless it is detected here.
-    # Only pure reorders are handled; adds and deletes have their own paths.
+    # the array back out sorted by `order`. Two things can go wrong here, both
+    # silent:
+    #
+    #   * Reusing the file index as the order. That is only valid for the very
+    #     first import. Existing habits keep the orders they were given when
+    #     there were more of them, so the gaps they left behind collide with
+    #     the fresh indices -- and two habits sharing an order sort by dict
+    #     insertion order, which shows up as two rows swapping at random.
+    #   * Renumbering on every sync, which bumps updatedAt on records whose
+    #     content did not change and lets a stale desktop view clobber a
+    #     concurrent edit made on the phone.
+    #
+    # So: keep existing orders, append new habits after the last one, and
+    # renumber only when the file order genuinely disagrees with that model --
+    # which is what a drag or a move-up on the desktop looks like.
     live_base = sorted((h for h in base["habits"].values() if not h.get("deleted")),
-                       key=lambda h: h.get("order", 0))
-    legacy_order = sorted(legacy_state["habits"].values(), key=lambda h: h["order"])
-    if [h["id"] for h in live_base] != [h["id"] for h in legacy_order] \
-            and {h["id"] for h in live_base} == {h["id"] for h in legacy_order}:
-        for record in legacy_order:
-            previous = base["habits"].get(record["id"]) or {}
-            if previous.get("order") == record["order"]:
+                       key=lambda h: (h.get("order", 0), h["id"]))
+    legacy_seq = [h["id"] for h in
+                  sorted(legacy_state["habits"].values(), key=lambda h: h["order"])]
+    legacy_ids = set(legacy_seq)
+    base_ids = {h["id"] for h in live_base}
+
+    expected = [h["id"] for h in live_base if h["id"] in legacy_ids] \
+        + [hid for hid in legacy_seq if hid not in base_ids]
+
+    if legacy_seq != expected:
+        for index, hid in enumerate(legacy_seq):
+            previous = base["habits"].get(hid) or {}
+            record = dict(delta["habits"].get(hid) or legacy_state["habits"][hid])
+            record["order"] = index * 10
+            if previous.get("order") == record["order"] and hid not in delta["habits"]:
                 continue
-            updated = dict(record)
-            updated["updatedAt"] = max(now, (previous.get("updatedAt") or 0) + 1)
-            updated["writer"] = writer
-            delta["habits"][record["id"]] = updated
+            record["updatedAt"] = max(now, (previous.get("updatedAt") or 0) + 1)
+            record["writer"] = writer
+            delta["habits"][hid] = record
             summary["habits_reordered"] = summary.get("habits_reordered", 0) + 1
+    else:
+        next_order = max((h.get("order", 0) for h in live_base), default=-10) + 10
+        for hid in legacy_seq:
+            if hid in base_ids:
+                continue
+            record = dict(delta["habits"].get(hid) or legacy_state["habits"][hid])
+            record["order"] = next_order
+            next_order += 10
+            record["updatedAt"] = now
+            record["writer"] = writer
+            delta["habits"][hid] = record
 
     return delta, summary
 

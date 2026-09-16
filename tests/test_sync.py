@@ -214,6 +214,54 @@ check("combined: two un-checks", summary["unchecked"] == 2, str(summary))
 check("combined: two check-ins", summary["checked"] == 2, str(summary))
 check("combined: one habit edit", summary["habits_edited"] == 1, str(summary))
 
+# ── Ordering ─────────────────────────────────────────────────────────────
+# Regression: the order used to be taken from the file index, which is only
+# valid for the very first import. Survivors of a deletion keep the orders
+# they were given when there were more habits, so a new habit's index collided
+# with a survivor's order -- and since sorting then fell back to dict insertion
+# order, two rows appeared to swap at random.
+
+habits, groups = sample_files()
+base = snapshot(habits, groups)
+habits = [habits[0], habits[2],
+          {"id": "h5", "name": "新习惯", "group": "学习", "checkins": []}]
+delta, summary = delta_for(habits, groups, base)
+merged = atm.merge_states(base, delta)
+
+live = atm.live_records(merged["habits"])
+orders = [h["order"] for h in live]
+check("gaps: orders stay unique after a delete plus an add",
+      len(orders) == len(set(orders)), str(orders))
+eq("gaps: no reorder is flagged when nothing was reordered",
+   summary.get("habits_reordered", 0), 0)
+
+got_habits, got_groups = atm.state_to_legacy(merged)
+eq("gaps: the new habit lands last",
+   [h["name"] for h in got_habits], ["单词复习", "阅读 30 分钟", "新习惯"])
+eq("gaps: round trip matches",
+   atm.legacy_projection(got_habits, got_groups),
+   atm.legacy_projection(habits, groups))
+
+# A real reorder on the desktop must be honoured, not silently reverted.
+habits, groups = sample_files()
+base = snapshot(habits, groups)
+habits.reverse()
+delta, summary = delta_for(habits, groups, base)
+check("reorder: detected", summary.get("habits_reordered", 0) > 0, str(summary))
+merged = atm.merge_states(base, delta)
+got_habits, _ = atm.state_to_legacy(merged)
+eq("reorder: the reversed order survives",
+   [h["id"] for h in got_habits], [h["id"] for h in habits])
+
+# Re-syncing an already-synced state must be a no-op, or every sync would bump
+# timestamps and let the desktop clobber edits made on the phone.
+settled = atm.merge_states(base, delta)
+settled_base = atm.normalize_state(settled)
+settled_habits, settled_groups = atm.state_to_legacy(settled)
+delta2, summary2 = delta_for(settled_habits, settled_groups, settled_base)
+check("idempotent: a second sync produces no operations",
+      sum(summary2.values()) == 0, str(summary2))
+
 # ── The round trip ───────────────────────────────────────────────────────
 # Merging the delta into the snapshot must reproduce exactly the files we
 # started from. If this holds, the diff lost nothing.

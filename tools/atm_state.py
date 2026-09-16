@@ -385,7 +385,10 @@ def state_to_legacy(state: dict):
     always comes back False; the round-trip check accounts for that.
     """
     state = normalize_state(state)
-    groups = sorted(live_records(state["groups"]), key=lambda g: g.get("order", 0))
+    # Break ties on id, not insertion order: two records sharing an `order`
+    # would otherwise sort differently on different devices, which presents as
+    # two rows swapping at random.
+    groups = sorted(live_records(state["groups"]), key=lambda g: (g.get("order", 0), g["id"]))
 
     legacy_groups = []
     name_by_gid = {}
@@ -401,7 +404,7 @@ def state_to_legacy(state: dict):
         })
 
     legacy_habits = []
-    for habit in sorted(live_records(state["habits"]), key=lambda h: h.get("order", 0)):
+    for habit in sorted(live_records(state["habits"]), key=lambda h: (h.get("order", 0), h["id"])):
         legacy_habits.append({
             "id": habit["id"],
             "name": habit.get("name", ""),
