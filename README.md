@@ -9,7 +9,7 @@
 
 - 打开方式：Safari 访问 `https://nikezi623.github.io/AITaskManager/` → 分享 → 添加到主屏幕
 - 数据存在私有仓库 `ATM-data`，手机和电脑双向同步
-- 电脑端手动同步：**先关掉程序**，双击 `tools\sync.bat`
+- **两端都自动同步**：电脑端开程序时拉取、关程序时推送，手机端切回前台时同步
 - 手机端使用说明、故障排查、调试方法见 [`docs/README.md`](docs/README.md)
 
 数据格式、同步机制与冲突处理的设计说明见
