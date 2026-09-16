@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Batch files MUST stay CRLF: cmd.exe mis-parses LF-only .bat files,
+# splitting lines mid-word and executing fragments as commands.
+*.bat text eol=crlf

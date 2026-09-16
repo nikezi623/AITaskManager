@@ -1,27 +1,33 @@
 @echo off
-REM UTF-8 so the Chinese habit names survive the console.
+REM Keep this file ASCII-only and CRLF-terminated: cmd.exe parses .bat
+REM byte-by-byte using the console code page, so non-ASCII text (or LF
+REM endings) desyncs it, especially after chcp. Chinese output lives in
+REM atm_sync.py, which handles UTF-8 properly.
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0.."
 
 echo ========================================
-echo   ATM - 与手机同步数据
+echo   ATM - Sync with phone
 echo ========================================
 echo.
-echo 重要：请先关闭 AI_TaskManager 程序。
-echo 程序运行时会把内存里的任务列表整个覆盖回文件，
-echo 那样同步刚拉下来的数据就白做了。
+echo IMPORTANT: close AI_TaskManager before continuing.
+echo A running window keeps its own copy in memory and rewrites the
+echo whole task list on the next change, discarding what this pulls down.
 echo.
 pause
 
-python tools\atm_sync.py %*
+REM Built from %~dp0 so this works regardless of the working directory
+REM and needs no literal backslash in the source.
+set SCRIPT=%~dp0atm_sync.py
+python "%SCRIPT%" %*
 set EXITCODE=%ERRORLEVEL%
 
 echo.
 if %EXITCODE% neq 0 (
-  echo [失败] 上面有错误信息。
+  echo [FAILED] See the messages above.
 ) else (
-  echo [完成] 现在可以重新打开程序了。
+  echo [OK] You can reopen the app now.
 )
 pause
 endlocal
