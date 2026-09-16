@@ -55,6 +55,39 @@ GROUPS_PATH = POOL_DIR / "groups.json"
 SETTINGS_PATH = POOL_DIR / "settings.json"
 ICON_PATH = BASE_DIR / "photo" / "app_icon.ico"
 
+# ── Cloud sync (optional) ────────────────────────────────────────────────
+# Imported defensively. sync_core.py and sync_engine.py live next to this file
+# so PyInstaller bundles them automatically, but if anything is missing the app
+# must still run as a purely local tracker rather than refusing to start.
+try:
+    import sync_core
+    import sync_engine
+
+    SYNC_PATHS = sync_core.SyncPaths(POOL_DIR)
+    SYNC_AVAILABLE = True
+except Exception as _sync_import_error:  # pragma: no cover - packaging safety net
+    sync_core = None
+    sync_engine = None
+    SYNC_PATHS = None
+    SYNC_AVAILABLE = False
+    # Write the reason next to the executable. Swallowing this silently would
+    # leave a windowed build with no console and no way to tell why sync is
+    # permanently "local mode".
+    try:
+        import traceback as _tb
+
+        (BASE_DIR / "sync_import_error.txt").write_text(
+            f"{type(_sync_import_error).__name__}: {_sync_import_error}\n\n"
+            + _tb.format_exc(),
+            encoding="utf-8")
+    except Exception:
+        pass
+
+# Startup and exit run on the critical path of opening/closing the window, so
+# they get a short leash. A slow network must not make the app feel broken.
+SYNC_START_TIMEOUT = 15
+SYNC_EXIT_TIMEOUT = 12
+
 # ── Fluent Colors ───────────────────────────────────────────────
 BG = "#f0f2f5"
 CARD_BG = "#ffffff"
@@ -116,6 +149,14 @@ TS = {
         "bot_done": "已打卡",
         "bot_missed": "未打卡",
         "bot_no_habits": "暂无习惯",
+        # sync
+        "sync_now": "立即同步",
+        "syncing": "同步中…",
+        "sync_never": "未同步",
+        "sync_ok": "已同步 {time}",
+        "sync_failed": "同步失败",
+        "sync_offline": "本地模式",
+        "sync_started": "启动时已拉取云端改动",
     },
     "en": {
         "title": "ATM · Habit Tracker",
@@ -147,6 +188,14 @@ TS = {
         "bot_done": "Done",
         "bot_missed": "Missed",
         "bot_no_habits": "No habits",
+        # sync
+        "sync_now": "Sync now",
+        "syncing": "Syncing…",
+        "sync_never": "Not synced",
+        "sync_ok": "Synced {time}",
+        "sync_failed": "Sync failed",
+        "sync_offline": "Local only",
+        "sync_started": "Pulled cloud changes on startup",
     },
 }
 
@@ -158,6 +207,16 @@ class DataStore:
     """Central data management."""
 
     def __init__(self):
+        self.selected_date = date.today()
+        self.reload()
+
+    def reload(self):
+        """Re-read the three files from disk.
+
+        Called at startup and after a mid-session sync. Every edit rewrites the
+        whole file from the in-memory list, so a list left stale by a sync
+        would silently revert whatever the sync just merged in from the phone.
+        """
         self.habits = self._load(HABITS_PATH, DEFAULT_HABITS)
         self.groups = self._load(GROUPS_PATH, DEFAULT_GROUPS)
         self.settings = self._load(SETTINGS_PATH, {
@@ -165,7 +224,6 @@ class DataStore:
             "lang": "zh", "font_size": 12,
         })
         self.lang = self.settings.get("lang", "zh")
-        self.selected_date = date.today()
 
     def _load(self, path: Path, default):
         if not path.exists():
@@ -948,11 +1006,133 @@ class GroupDialog(QDialog):
 class HabitApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        # (i18n key, params) rather than a rendered string: the startup sync
+        # runs before DataStore exists, so there is no language to translate
+        # with yet. Resolved lazily by _sync_text().
+        self._sync_state = ("sync_never", {})
+        self._sync_detail = ""   # tooltip: the underlying error, verbatim
+        self._sync_busy = False  # re-entrancy guard for sync_now / closeEvent
+
+        # Pull BEFORE DataStore reads the files, so the window opens on
+        # whatever the phone did since this machine was last used.
+        self._sync_on_start()
+
         self.data = DataStore()
         self._habit_rows = {}  # habit_id -> HabitRow
         self._group_headers = {}  # group_name -> GroupHeader
         self._setup_ui()
         self._build_all()
+
+    # ── Cloud sync ───────────────────────────────────────────────────────
+
+    def _sync_text(self) -> str:
+        key, params = self._sync_state
+        return self.data.fmt(key, **params) if params else self.data.t(key)
+
+    def _sync_log(self, message: str) -> None:
+        """Append to .atm/sync.log.
+
+        A --windowed .exe has no console, so without this a user whose sync
+        fails has no way to tell me what happened. Best-effort: never let
+        logging itself break a sync.
+        """
+        if not SYNC_AVAILABLE:
+            return
+        try:
+            path = SYNC_PATHS.state / "sync.log"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{stamp}  {message}\n")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > 200:
+                path.write_text("\n".join(lines[-200:]) + "\n", encoding="utf-8")
+        except Exception:  # noqa: BLE001 - logging must never be fatal
+            pass
+
+    def _run_sync(self, timeout: int, quiet: bool = False) -> bool:
+        """One pull-merge-push. Never raises: sync is a convenience, and a
+        failure must leave the app fully usable from local files."""
+        if not SYNC_AVAILABLE:
+            self._sync_state = ("sync_offline", {})
+            self._sync_detail = "sync modules not available in this build"
+            self._sync_log(f"SKIP  {self._sync_detail}")
+            return False
+        token = sync_core.resolve_token(state_dir=SYNC_PATHS.state)
+        if not token:
+            self._sync_state = ("sync_offline", {})
+            self._sync_detail = (
+                "no GitHub token: run `gh auth login`, or save one in "
+                f"{SYNC_PATHS.state / 'token'}")
+            self._sync_log(f"SKIP  no token (looked at env, {SYNC_PATHS.state / 'token'}, gh)")
+            return False
+        try:
+            summary = sync_engine.sync_once(SYNC_PATHS, token=token, timeout=timeout)
+        except sync_engine.SyncError as exc:
+            self._sync_state = ("sync_failed", {})
+            self._sync_detail = str(exc)
+            self._sync_log(f"FAIL  {exc}")
+            return False
+        except Exception as exc:  # noqa: BLE001 - a sync bug must not be fatal
+            import traceback
+            self._sync_state = ("sync_failed", {})
+            self._sync_detail = f"{type(exc).__name__}: {exc}"
+            self._sync_log(f"FAIL  {type(exc).__name__}: {exc}\n"
+                           + "\n".join("      " + line for line in
+                                       traceback.format_exc().splitlines()[-6:]))
+            return False
+        self._sync_state = ("sync_ok", {"time": datetime.now().strftime("%H:%M")})
+        self._sync_detail = ""
+        pushed = "pushed" if summary.get("pushed") else "no change"
+        self._sync_log(f"OK    {pushed}; token={token[:12]}...")
+        return True
+
+    def _sync_on_start(self):
+        self._run_sync(SYNC_START_TIMEOUT)
+
+    def sync_now(self):
+        """Header button: sync on demand, with the outcome shown in the footer."""
+        if self._sync_busy:
+            return
+        self._sync_busy = True
+        self._sync_btn.setEnabled(False)
+        self._sync_state = ("syncing", {})
+        self._sync_detail = ""
+        self._update_footer()
+        self.setCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            synced = self._run_sync(SYNC_EXIT_TIMEOUT)
+        finally:
+            self.setCursor(Qt.ArrowCursor)
+            self._sync_busy = False
+            self._sync_btn.setEnabled(True)
+        if synced:
+            # The sync rewrote the files with the merged result, and every edit
+            # rewrites the whole file from memory -- so without this reload the
+            # next edit would silently revert the phone's changes.
+            self.data.reload()
+            self._refresh_all()
+        self._update_footer()
+
+    def closeEvent(self, event):  # noqa: N802 - Qt naming
+        """Push whatever this session changed before the window goes away.
+
+        Without this, edits made here would not reach the phone until the next
+        time the app was opened, which reads as "sync is broken".
+        """
+        if not self._sync_busy and SYNC_AVAILABLE:
+            self._sync_busy = True
+            self.setCursor(Qt.WaitCursor)
+            self._sync_state = ("syncing", {})
+            self._update_footer()
+            QApplication.processEvents()
+            try:
+                self._run_sync(SYNC_EXIT_TIMEOUT)
+            finally:
+                self._sync_busy = False
+                self.setCursor(Qt.ArrowCursor)
+        super().closeEvent(event)
 
     def _setup_ui(self):
         self.setWindowTitle(self.data.t("title"))
@@ -979,6 +1159,19 @@ class HabitApp(QMainWindow):
         self._title_label = title
         header.addWidget(title)
         header.addStretch()
+
+        sync_btn = QPushButton("↻ " + self.data.t("sync_now"))
+        sync_btn.setFlat(True)
+        sync_btn.setFont(QFont("Segoe UI", 11))
+        sync_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_SEC}; border: 1px solid {BORDER}; "
+            f"border-radius: 6px; padding: 4px 12px; }}"
+            f"QPushButton:hover {{ color: {PRIMARY}; border-color: {PRIMARY}; }}"
+            f"QPushButton:disabled {{ color: {BORDER}; border-color: {BORDER}; }}"
+        )
+        sync_btn.clicked.connect(self.sync_now)
+        self._sync_btn = sync_btn
+        header.addWidget(sync_btn)
 
         lang_btn = QPushButton(self.data.t("lang"))
         lang_btn.setFlat(True)
@@ -1021,6 +1214,14 @@ class HabitApp(QMainWindow):
         self._footer_label.setFont(QFont("Segoe UI", 11))
         self._footer_label.setStyleSheet(f"color: {TEXT_SEC}; border: none;")
         footer.addWidget(self._footer_label)
+
+        # Sync state in words. A colour-only indicator is invisible at a
+        # glance, and the whole point is knowing whether the phone has your
+        # latest edits.
+        self._sync_label = QLabel("")
+        self._sync_label.setFont(QFont("Segoe UI", 10))
+        self._sync_label.setStyleSheet(f"color: {TEXT_SEC}; border: none;")
+        footer.addWidget(self._sync_label)
         footer.addStretch()
 
         stats_btn = QPushButton("📊")
@@ -1147,6 +1348,8 @@ class HabitApp(QMainWindow):
     def _update_footer(self):
         rate = self.data.week_completion_rate()
         self._footer_label.setText(self.data.t("week_completion") + f": {rate}%")
+        self._sync_label.setText(self._sync_text())
+        self._sync_label.setToolTip(self._sync_detail)
 
     # ── Slots ──
     def _on_date_clicked(self, date_str):

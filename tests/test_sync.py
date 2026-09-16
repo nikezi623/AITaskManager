@@ -57,13 +57,13 @@ def sample_files():
 
 
 def snapshot(habits, groups):
-    state, _ = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
-                                       atm.empty_state(), NOW, WRITER)
+    state = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
+                                    atm.empty_state(), NOW, WRITER)
     return state
 
 
 def delta_for(habits, groups, base):
-    state, _ = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
+    state = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
                                        base, NOW, WRITER)
     return sync.diff_against_snapshot(state, base, NOW + 100, WRITER)
 
@@ -111,7 +111,7 @@ check("un-check: the other date is still checked",
       atm.is_checked(merged, "h1", "2026-09-15"))
 
 # A stale device that still believes 09-14 was checked must not resurrect it.
-stale, _ = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
+stale = sync.build_legacy_state(copy.deepcopy(habits), copy.deepcopy(groups),
                                    atm.empty_state(), NOW - 5000, "phone")
 stale["checkins"]["h1"]["2026-09-14"] = NOW - 5000
 revived = atm.merge_states(merged, stale)
@@ -297,6 +297,80 @@ check("privacy: the webhook URL never reaches the synced state",
       "SUPERSECRET" not in atm.stable_stringify(merged))
 check("privacy: no settings value is carried in the state at all",
       "webhook" not in atm.stable_stringify(merged).lower())
+
+# ── An unchanged sync must not create a commit ───────────────────────────
+# The desktop app syncs on every launch and every exit. If each of those wrote
+# a commit, the real history would be buried under empty ones -- and that
+# history IS the manual recovery path when something goes wrong.
+
+import json  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+import sync_core as core  # noqa: E402
+import sync_engine  # noqa: E402
+
+tmp = Path(tempfile.mkdtemp(prefix="atm-noop-"))
+try:
+    noop_pool = tmp / "task_pool"
+    noop_pool.mkdir()
+    (noop_pool / "habits.json").write_text(json.dumps(
+        [{"id": "h1", "name": "本地习惯", "group": "雅思", "checkins": ["2026-09-14"]}],
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    (noop_pool / "groups.json").write_text(json.dumps(
+        [{"name_zh": "雅思", "name_en": "IELTS", "color": "#881798",
+          "collapsed": False, "order": 0}], ensure_ascii=False, indent=2), encoding="utf-8")
+    (noop_pool / "settings.json").write_text(json.dumps(
+        {"bot_enabled": True, "lang": "zh"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    paths = core.SyncPaths(noop_pool, tmp / ".atm")
+    pushed: list = []
+    remote: dict = {"state": None}
+
+    real_get, real_put = core.get_remote_state, core.put_remote_state
+    core.get_remote_state = lambda token, **kw: (
+        remote["state"], "sha1" if remote["state"] else None)
+
+    def fake_put(state, sha, token, message, **kw):
+        pushed.append(state)
+        return "sha2"
+
+    core.put_remote_state = fake_put
+    try:
+        sync_engine.sync_once(paths, token="fake-token")
+        after_first = len(pushed)
+
+        remote["state"] = pushed[0]          # the cloud now matches exactly
+        sync_engine.sync_once(paths, token="fake-token")
+        after_second = len(pushed)
+
+        # A third time, to be sure it is stable rather than right only once.
+        sync_engine.sync_once(paths, token="fake-token")
+        after_third = len(pushed)
+
+        # A real change must still go through.
+        habits = json.loads((noop_pool / "habits.json").read_text(encoding="utf-8"))
+        habits[0]["checkins"].append("2026-09-16")
+        (noop_pool / "habits.json").write_text(
+            json.dumps(habits, ensure_ascii=False, indent=2), encoding="utf-8")
+        core.get_remote_state = lambda token, **kw: (pushed[-1], "sha1")
+        sync_engine.sync_once(paths, token="fake-token")
+        after_change = len(pushed)
+    finally:
+        core.get_remote_state, core.put_remote_state = real_get, real_put
+
+    check("no-op: the first sync pushes what the cloud lacks",
+          after_first == 1, str(after_first))
+    check("no-op: a sync with nothing to send does not commit",
+          after_second == 1, f"pushed {after_second} times")
+    check("no-op: still no commit on a third run",
+          after_third == 1, f"pushed {after_third} times")
+    check("no-op: a real change is still committed",
+          after_change == 2, f"pushed {after_change} times")
+    check("no-op: and the new check-in is in it",
+          atm.is_checked(pushed[-1], "h1", "2026-09-16"))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
 
 # ── Report ───────────────────────────────────────────────────────────────
 
